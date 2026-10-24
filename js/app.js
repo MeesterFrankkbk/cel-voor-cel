@@ -840,6 +840,84 @@
             h('div', { class: 'btn-row' }, add), h('div', { class: 'small' }, h('b', {}, 'Regels:')), list)),
         h('div', { class: 'btn-row' }, chk), ui.fb);
     },
+    protectSim(w, onDone) {
+      // Cellen ontgrendelen, blad beveiligen en uitproberen.
+      const ui = roundsUI(1);
+      const ROWS = w.rows, NC = w.cols;
+      const vals = Object.assign({}, w.cells);
+      const unlocked = new Set();
+      let prot = false, sel = null, anchor = null, dragging = false, stage = 'setup', triedLocked = false, typedOpen = false;
+      const A = (c, r) => COLS[c] + r;
+      const table = h('table', { class: 'mini prot-table' });
+      const head = h('tr', {}, h('th', { class: 'corner' }));
+      for (let c = 0; c < NC; c++) head.append(h('th', {}, COLS[c]));
+      table.append(h('thead', {}, head));
+      const tb = h('tbody');
+      for (let r = 1; r <= ROWS; r++) { const tr = h('tr', {}, h('th', {}, r)); for (let c = 0; c < NC; c++) tr.append(h('td', { class: 'click', 'data-c': c, 'data-r': r })); tb.append(tr); }
+      table.append(tb);
+      const nb = h('b', {});
+      const lockBox = h('input', { type: 'checkbox', id: 'lock-' + Math.random().toString(36).slice(2, 6) });
+      const protBtn = h('button', { class: 'btn', onclick: () => toggleProt() }, 'Blad beveiligen');
+      const status = h('span', { class: 'chip' }, 'Blad niet beveiligd');
+      const typeIn = h('input', { class: 'in', placeholder: 'typ in de gekozen cel en druk Enter', 'aria-label': 'Typ in de cel' });
+      const popup = h('div', { class: 'dv-popup prot-pop', hidden: true });
+      const selCells = () => { const out = []; if (!sel) return out; for (let r = sel.r1; r <= sel.r2; r++) for (let c = sel.c1; c <= sel.c2; c++) out.push(A(c, r)); return out; };
+      function paint() {
+        table.querySelectorAll('td').forEach(td => {
+          const c = +td.dataset.c, r = +td.dataset.r, a = A(c, r);
+          td.textContent = vals[a] ?? '';
+          td.style.textAlign = typeof vals[a] === 'number' ? 'right' : 'left'; td.style.paddingInline = '6px';
+          td.classList.toggle('insel', !!sel && c >= sel.c1 && c <= sel.c2 && r >= sel.r1 && r <= sel.r2);
+          td.classList.toggle('unlocked', unlocked.has(a));
+        });
+        const cs = selCells();
+        nb.textContent = cs.length ? (cs.length > 1 ? cs[0] + ':' + cs[cs.length - 1] : cs[0]) : '';
+        lockBox.checked = cs.length ? cs.every(a => !unlocked.has(a)) : true;
+        lockBox.disabled = prot || !cs.length;
+        protBtn.textContent = prot ? 'Beveiliging opheffen' : 'Blad beveiligen';
+        status.textContent = prot ? '🔒 Blad beveiligd' : 'Blad niet beveiligd';
+        status.className = 'chip' + (prot ? ' ok' : '');
+      }
+      const tdAt = e => { const el = document.elementFromPoint(e.clientX, e.clientY); const td = el && el.closest && el.closest('td'); return td && table.contains(td) ? td : null; };
+      table.addEventListener('pointerdown', e => { const td = e.target.closest('td'); if (!td) return; e.preventDefault(); anchor = { c: +td.dataset.c, r: +td.dataset.r }; sel = { c1: anchor.c, c2: anchor.c, r1: anchor.r, r2: anchor.r }; dragging = true; popup.hidden = true; paint(); });
+      window.addEventListener('pointermove', e => { if (!dragging || !document.body.contains(table)) return; const td = tdAt(e); if (!td) return; const c = +td.dataset.c, r = +td.dataset.r; sel = { c1: Math.min(anchor.c, c), c2: Math.max(anchor.c, c), r1: Math.min(anchor.r, r), r2: Math.max(anchor.r, r) }; paint(); });
+      window.addEventListener('pointerup', () => { dragging = false; });
+      lockBox.addEventListener('change', () => { selCells().forEach(a => lockBox.checked ? unlocked.delete(a) : unlocked.add(a)); paint(); ui.fb.textContent = ''; });
+      function toggleProt() {
+        if (prot) { prot = false; stage = 'setup'; paint(); ui.fb.className = 'fb'; ui.fb.textContent = 'De beveiliging is opgeheven. Je kan nu weer cellen ontgrendelen.'; return; }
+        prot = true; paint();
+        const want = new Set(w.open), got = [...unlocked];
+        const extra = got.filter(a => !want.has(a)), miss = [...want].filter(a => !unlocked.has(a));
+        if (!got.length) return bad(ui.fb, 'Het blad is beveiligd, maar ALLE cellen zijn nog geblokkeerd. De gebruiker kan zelfs geen antwoord typen! Hef de beveiliging op en ontgrendel eerst de antwoordcellen.', table);
+        if (miss.length) return bad(ui.fb, `Nog niet alle antwoordcellen zijn ontgrendeld: ${miss.join(', ')}. Hef de beveiliging op en ontgrendel ze.`, table);
+        if (extra.length) return bad(ui.fb, `Ook ${extra.join(', ')} ${extra.length > 1 ? 'zijn' : 'is'} ontgrendeld. Dan kan de gebruiker daar iets veranderen. Hef de beveiliging op en blokkeer ze weer.`, table);
+        stage = 'try'; good(ui.fb, `Goed beveiligd! Probeer het uit: klik op een antwoordcel (${w.open[0]}) en typ iets. Probeer daarna iets te typen in een oplossing (kolom B).`);
+      }
+      typeIn.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        const cs = selCells(); if (cs.length !== 1) return bad(ui.fb, 'Klik eerst op één cel.', table);
+        const a = cs[0];
+        if (prot && !unlocked.has(a)) {
+          popup.replaceChildren(h('b', {}, 'Microsoft Excel'), h('p', {}, 'De cel die je probeert te wijzigen, staat op een beveiligd blad.'), h('button', { class: 'btn small', onclick: () => { popup.hidden = true; } }, 'OK'));
+          popup.hidden = false; triedLocked = true;
+        } else { const t = typeIn.value.trim(); vals[a] = /^-?\d+(,\d+)?$/.test(t) ? parseFloat(t.replace(',', '.')) : t; if (w.open.includes(a)) typedOpen = true; paint(); }
+        typeIn.value = '';
+        if (stage === 'try') {
+          if (typedOpen && triedLocked) { good(ui.fb, 'Precies zo! De gebruiker kan antwoorden typen, maar niets anders kapotmaken.'); stage = 'done'; protBtn.disabled = true; onDone(); }
+          else if (typedOpen) good(ui.fb, 'Antwoorden typen lukt. Probeer nu iets te typen in een oplossing (kolom B).');
+          else if (triedLocked) good(ui.fb, 'Zie je? Excel beschermt die cel. Typ nu een antwoord in een antwoordcel.');
+        }
+      });
+      paint(); ui.set(0, w.ask);
+      return h('div', { class: 'q' }, ui.ask,
+        h('p', { class: 'small muted' }, 'Selecteer cellen door erover te slepen. Ontgrendelde cellen krijgen een stippellijn.'),
+        h('div', { class: 'ribbon prot-ribbon' },
+          h('div', { class: 'rgroup' }, h('span', {}, '1. Celeigenschappen › Bescherming'), h('label', { class: 'dv-check', for: lockBox.id }, lockBox, ' Geblokkeerd')),
+          h('div', { class: 'rgroup' }, h('span', {}, '2. Controleren'), h('div', { class: 'btn-row' }, protBtn, status))),
+        h('div', { style: 'display:grid;gap:8px;min-width:0' }, h('div', { class: 'mini-namebox' }, 'Naamvak', nb), h('div', { class: 'grid-wrap' }, table),
+          h('div', { class: 'dv-cellwrap prot-type' }, typeIn, popup)),
+        ui.fb);
+    },
     numSim(w, onDone) {
       const nl = window.CvcModules.nlNum;
       const ui = roundsUI(w.rounds.length);

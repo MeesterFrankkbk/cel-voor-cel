@@ -1755,11 +1755,189 @@
     }
   };
 
-  const MODULES = [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10];
+  // ======================================================================
+  // MODULE 11 – Klaar voor een gebruiker
+  // ======================================================================
+  function m11data(seed, mode) {
+    const r = rng(seed + '|m11|' + mode);
+    const test = mode === 'test';
+    const nums = r.shuffle(REKEN).slice(0, 2), txt = r.shuffle([...HOOFDSTEDEN.map(x => [x[0], x[1]]), ...OVERIG.filter(x => typeof x[1] === 'string')]).slice(0, 4);
+    const q = r.shuffle([...nums, ...txt]);
+    const ti = q.findIndex(x => typeof x[1] === 'string'), ni = q.findIndex(x => typeof x[1] === 'number');
+    return { q, ti, ni, W: test ? { ok: 'goed', bad: 'fout', empty: 'vul in' } : { ok: 'juist', bad: 'jammer', empty: 'vul in' } };
+  }
+  /* SPATIES.WISSEN-controle: werkt de formule ook met een spatie te veel, en ook bij getallen? */
+  function trimCheck(sheet, a, ans, sol, W) {
+    const base = ifAnswerCheck(sheet, a, ans, sol, W, true);
+    if (!base.ok) {
+      const s = sheet.calc(sol);
+      if (isNum(s) && FX.info(sheet.formula(a) || '', 'en').funcs.includes('TRIM') && said(tryWith(sheet, a, { [ans]: s })) !== norm(W.ok))
+        return no(`In ${a} geeft een juist getal (${showV(s)}) nu "${said(tryWith(sheet, a, { [ans]: s }))}". SPATIES.WISSEN maakt van een getal tekst, en "${showV(s)}" als tekst is niet hetzelfde als het getal ${showV(s)}. Zet SPATIES.WISSEN rond allebei: SPATIES.WISSEN(${ans})=SPATIES.WISSEN(${sol})`);
+      return base;
+    }
+    const f = sheet.formula(a), s = sheet.calc(sol);
+    if (!FX.info(f, 'en').funcs.includes('TRIM')) return no(`Gebruik SPATIES.WISSEN in ${a}, zodat een spatie te veel geen "${W.bad}" geeft.`);
+    const withSpace = said(tryWith(sheet, a, { [ans]: showV(s) + ' ' }));
+    if (withSpace !== norm(W.ok)) return no(`Typt de gebruiker "${showV(s)} " (met een spatie erachter), dan toont ${a} "${withSpace}". Kijk na waar je SPATIES.WISSEN zette.`);
+    return ok();
+  }
+
+  const m11 = {
+    id: 'm11', nr: 11,
+    title: 'Klaar voor een gebruiker',
+    short: 'Je maakt je werkblad klaar voor iemand anders: de score tellen, spaties wegwerken, een afbeelding, oplossingen verbergen en het blad beveiligen.',
+    skills: ['AANTAL.ALS', 'SPATIES.WISSEN', 'score in procent', 'afbeelding', 'kolom verbergen', 'rasterlijnen', 'cellen ontgrendelen', 'blad beveiligen'],
+    lessons: [
+      { id: 'l1', title: 'De score tellen',
+        body: `<p>Hoeveel antwoorden zijn juist? Dat telt Excel met <b>AANTAL.ALS</b>: het telt hoe vaak iets voorkomt in een bereik.</p>
+<p><b>=AANTAL.ALS(D2:D6;"juist")</b> telt hoe vaak "juist" in D2:D6 staat.</p>`,
+        widget: { type: 'sheetSim', rows: 8, cols: 4, widths: [110, 20, 20, 80], cells: { D1: 'Feedback', D2: 'juist', D3: 'jammer', D4: 'juist', D5: 'vul in', D6: 'juist', A8: 'Aantal juist' }, rounds: [
+          { select: 'B8', ask: 'Tel in <span class="addr">B8</span> hoeveel keer "juist" in D2:D6 staat.',
+            check: (s, ch) => {
+              if (ch !== 'B8') return null;
+              const i = s.info('B8');
+              if (!i) return no('Een formule begint met =.');
+              if (i.error === '#SEP') return no('Tussen de delen zet je een puntkomma: =AANTAL.ALS(D2:D6;"juist")');
+              if (!i.funcs.includes('COUNTIF')) return no(i.funcs.includes('COUNTA') ? 'AANTALARG telt alle gevulde cellen. Gebruik AANTAL.ALS.' : 'Gebruik de functie AANTAL.ALS.');
+              return s.num('B8') === 3 ? ok('Juist: 3 keer "juist".') : no(`Je formule geeft ${s.show('B8')}. Er staat 3 keer "juist".`);
+            } },
+          { select: 'D3', ask: 'De gebruiker verbetert zijn antwoord: typ <b>juist</b> in <span class="addr">D3</span>. Kijk naar de score.',
+            check: (s, ch) => ch !== 'D3' ? null : s.num('B8') === 4 ? ok('De score telt vanzelf mee: 4.') : no('Typ juist in D3.') }
+        ] } },
+      { id: 'l2', title: 'Spaties weghalen',
+        body: `<p>Typt de gebruiker per ongeluk een spatie achter zijn antwoord, dan zegt je werkblad "jammer". Niet eerlijk! <b>SPATIES.WISSEN</b> haalt overbodige spaties weg.</p>
+<p>Maar let op: SPATIES.WISSEN maakt van alles <b>tekst</b>, ook van een getal. Voor Excel is de tekst "42" niet hetzelfde als het getal 42. Daarom zet je SPATIES.WISSEN rond <b>allebei</b>:</p>
+<p><b>=ALS(SPATIES.WISSEN(C2)=SPATIES.WISSEN(B2);"juist";"jammer")</b></p>`,
+        widget: { type: 'sheetSim', rows: 3, cols: 4, widths: [150, 80, 80, 90], cells: { A1: 'Vraag', B1: 'Oplossing', C1: 'Antwoord', D1: 'Feedback', A2: 'Hoofdstad van Italië?', B2: 'Rome', C2: 'Rome ', D2: '=ALS(C2=B2;"juist";"jammer")', A3: '6 x 7 =', B3: 42, C3: '42 ', D3: '=ALS(C3=B3;"juist";"jammer")' }, rounds: [
+          { select: 'D2', ask: 'D2 zegt "jammer", maar Rome is juist: er staat een spatie achter. Verbeter D2 met <b>SPATIES.WISSEN</b>.',
+            check: (s, ch) => {
+              if (ch !== 'D2') return null;
+              const i = s.info('D2');
+              if (!i || !i.funcs.includes('TRIM')) return no('Gebruik SPATIES.WISSEN rond C2.');
+              return norm(s.show('D2')) === 'juist' ? ok('Juist! De spatie telt niet meer mee.') : no(`D2 toont "${s.show('D2')}". Kijk je formule na.`);
+            } },
+          { select: 'D3', ask: 'Ook in C3 staat een spatie te veel. Verbeter <span class="addr">D3</span> op dezelfde manier. Wat gebeurt er?',
+            check: (s, ch) => {
+              if (ch !== 'D3') return null;
+              const i = s.info('D3');
+              if (!i || !i.funcs.includes('TRIM')) return no('Gebruik SPATIES.WISSEN.');
+              if (norm(s.show('D3')) === 'juist') return ok('Juist! Met SPATIES.WISSEN aan beide kanten werkt het ook voor getallen.');
+              return no('Nog altijd "jammer"! SPATIES.WISSEN maakt van 42 de tekst "42", en die is voor Excel niet gelijk aan het getal 42. Zet SPATIES.WISSEN rond allebei: =ALS(SPATIES.WISSEN(C3)=SPATIES.WISSEN(B3);"juist";"jammer")');
+            } }
+        ] } },
+      { id: 'l3', title: 'Een afbeelding',
+        body: `<p>Een afbeelding maakt je werkblad aantrekkelijker, bv. een prentje bij een vraag of een logo naast de titel.</p>`,
+        widget: { type: 'steps', steps: [
+          'Klik op het tabblad <b>Invoegen</b> → <b>Afbeeldingen</b>.',
+          'Kies <b>Dit apparaat</b> (een afbeelding op je computer) of <b>Stockafbeeldingen</b> (afbeeldingen van Excel zelf).',
+          'De afbeelding <b>zweeft</b> boven de cellen. Sleep ze naar de juiste plaats en maak ze kleiner met de <b>hoekjes</b> (dan blijft ze mooi in verhouding).',
+          'In Excel 365 kan het ook <b>in een cel</b>: Invoegen → Afbeeldingen → <b>Plaatsen in cel</b>. De afbeelding wordt dan even groot als de cel.',
+          'Denk aan de gebruiker: een afbeelding moet <b>helpen</b>, niet de vragen bedekken.'
+        ], confirm: 'Ik weet hoe ik een afbeelding invoeg' } },
+      { id: 'l4', title: 'Oplossingen verbergen',
+        body: `<p>De gebruiker mag de oplossingen in kolom B niet zien. Rechtsklik op de kolomletter <b>B</b> en kies <b>Verbergen</b>. De formules werken gewoon verder.</p>
+<p>Zonder de grijze <b>rasterlijnen</b> lijkt je werkblad meer op een echt werkblad: tabblad <b>Beeld</b> → vinkje <b>Rasterlijnen</b> weg.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Hoe verberg je kolom B?', options: ['Rechtsklik op de letter B → Verbergen', 'Kolom B leegmaken', 'De letters in kolom B wit kleuren'], correct: 0, explain: 'Leegmaken kan niet: dan zijn de oplossingen weg. Wit kleuren is te makkelijk te zien als je de cel aanklikt.' },
+          { q: 'Hoe maak je kolom B weer zichtbaar?', options: ['Selecteer kolom A tot C, rechtsklik → Zichtbaar maken', 'Dat kan niet meer', 'Druk een week later op Ctrl + Z'], correct: 0, explain: 'Een verborgen kolom is dus niet echt geheim…' },
+          { q: 'Een slimme gebruiker kan een verborgen kolom zichtbaar maken. Hoe voorkom je dat?', options: ['Het blad beveiligen', 'Een kleinere letter gebruiken', 'Het bestand een andere naam geven'], correct: 0, explain: 'Op een beveiligd blad kan je geen kolommen zichtbaar maken. Dat zie je in de volgende les.' }
+        ] } },
+      { id: 'l5', title: 'Beveiligen',
+        body: `<p>Op een beveiligd blad kan de gebruiker niets kapotmaken: geen formule wissen, geen kolom zichtbaar maken. Alleen de cellen die jij <b>ontgrendelt</b>, kan hij invullen.</p>
+<p><b>1.</b> Selecteer de antwoordcellen → rechtsklik → <b>Celeigenschappen</b> (of <span class="key">Ctrl</span> + <span class="key">1</span>) → tabblad <b>Bescherming</b> → vinkje <b>Geblokkeerd</b> weg.<br>
+<b>2.</b> Tabblad <b>Controleren</b> → <b>Blad beveiligen</b> → OK. Een wachtwoord mag, maar vergeet het niet!</p>
+<p>De volgorde is belangrijk: eerst ontgrendelen, dan beveiligen. Op een beveiligd blad kan je niets meer ontgrendelen.</p>`,
+        widget: { type: 'protectSim', rows: 4, cols: 4, open: ['C2', 'C3', 'C4'], ask: 'Zorg dat de gebruiker alleen in <span class="addr">C2:C4</span> kan typen: ontgrendel eerst C2:C4, en beveilig daarna het blad.',
+          cells: { A1: 'Vraag', B1: 'Oplossing', C1: 'Antwoord', D1: 'Feedback', A2: '6 x 7 =', B2: 42, D2: 'vul in', A3: 'Hoofdstad van Italië?', B3: 'Rome', D3: 'vul in', A4: 'Meervoud van kind?', B4: 'kinderen', D4: 'vul in' } } }
+    ],
+    startFile(seed, mode) {
+      const d = m11data(seed, mode), b = { bold: true }, W = d.W;
+      const cells = { A1: { v: 'Mijn werkblad – klaar voor een gebruiker', bold: true, size: 14 }, A3: { v: 'Vraag', ...b }, B3: { v: 'Oplossing', ...b }, C3: { v: 'Antwoord', ...b }, D3: { v: 'Feedback', ...b },
+        A11: { v: 'Aantal juist', ...b }, A12: { v: 'Score', ...b } };
+      d.q.forEach((x, k) => {
+        const r = 4 + k;
+        cells['A' + r] = x[0]; cells['B' + r] = x[1];
+        cells['D' + r] = { f: `IF(C${r}="","${W.empty}",IF(C${r}=B${r},"${W.ok}","${W.bad}"))` };
+      });
+      cells['C' + (4 + d.ti)] = d.q[d.ti][1] + ' ';           // een juist antwoord met een spatie te veel
+      return { name: mode === 'test' ? 'Test11_gebruiker.xlsx' : 'Module11_gebruiker.xlsx', spec: { sheetName: 'Werkblad', cells, colWidths: { A: 34, B: 12, C: 13, D: 12 } } };
+    },
+    gen(seed, mode) {
+      const d = m11data(seed, mode), W = d.W, D = ['D4', 'D5', 'D6', 'D7', 'D8', 'D9'];
+      return { startFile: true, tasks: [
+        { id: 't1', text: `Tel in <span class="addr">B11</span> hoeveel keer <b>"${W.ok}"</b> in D4:D9 staat, met <b>AANTAL.ALS</b>.`,
+          hints: ['AANTAL.ALS heeft twee delen: het bereik en wat je telt.', `Typ =AANTAL.ALS(D4:D9;"${W.ok}")`],
+          check: ({ sheet }) => {
+            const f = sheet.formula('B11');
+            if (!f) { const r0 = checkFormula(sheet, 'B11', {}); return r0.ok ? no('Typ in B11 een formule met AANTAL.ALS.') : r0; }
+            const inf = FX.info(f, 'en');
+            if (FX.isErr(sheet.calc('B11'))) return checkFormula(sheet, 'B11', {});
+            if (!inf.funcs.includes('COUNTIF')) return no(inf.funcs.includes('COUNTA') ? 'AANTALARG telt alle gevulde cellen, ook "jammer". Gebruik AANTAL.ALS.' : 'Gebruik de functie AANTAL.ALS.');
+            const miss = D.filter(a => !inf.cells.includes(a));
+            if (miss.length) return no(`Je bereik telt ${list(miss)} niet mee. Gebruik D4:D9.`);
+            const all = {}, none = {}, three = {};
+            D.forEach((a, k) => { all[a] = W.ok; none[a] = W.bad; three[a] = k % 2 ? W.ok : W.empty; });
+            const t = o => numOf(tryWith(sheet, 'B11', o));
+            if (t(all) !== 6 || t(none) !== 0 || t(three) !== 3) return no(`Je formule telt niet hoe vaak "${W.ok}" voorkomt. Kijk na wat er tussen de aanhalingstekens staat.`);
+            return ok();
+          } },
+        { id: 't2', text: `Toon in <span class="addr">B12</span> de <b>score als procent</b>: het aantal juiste antwoorden gedeeld door het aantal vragen (6).`,
+          hints: ['Delen doe je met /. Daarna de knop %.', 'Typ =B11/6 en klik op %.'],
+          check: ({ sheet }) => {
+            const f = sheet.formula('B12');
+            if (!f) { const r0 = checkFormula(sheet, 'B12', {}); return r0.ok ? no('Typ in B12 een formule.') : r0; }
+            if (!FX.info(f, 'en').cells.includes('B11')) return no('Gebruik het aantal juist uit B11 in je formule.');
+            const v = numOf(tryWith(sheet, 'B12', { B11: 3 }));
+            if (v == null || Math.abs(v - 0.5) > 1e-9) return no(`Je formule rekent niet goed: bij 3 juist moet het 50% zijn, nu is het ${v == null ? 'geen getal' : pctTxt(v)}.`);
+            return sheet.numFmt('B12').kind === 'percent' ? ok() : no('B12 rekent goed. Toon het nog als procent met de knop %.');
+          } },
+        { id: 't3', text: `Verbeter de formules in <span class="addr">D4:D9</span> met <b>SPATIES.WISSEN</b>, zodat een spatie te veel geen "${W.bad}" meer geeft. Het moet ook werken bij getallen!`,
+          hints: ['Zet SPATIES.WISSEN rond het antwoord én rond de oplossing.', `=ALS(C4="";"${W.empty}";ALS(SPATIES.WISSEN(C4)=SPATIES.WISSEN(B4);"${W.ok}";"${W.bad}")) en doortrekken.`],
+          check: ({ sheet }) => {
+            const first = trimCheck(sheet, 'D4', 'C4', 'B4', W);
+            if (!first.ok) return first;
+            for (let r = 5; r <= 9; r++) { const res = trimCheck(sheet, 'D' + r, 'C' + r, 'B' + r, W); if (!res.ok) return /^In D\d+ geeft een juist getal/.test(res.msg) ? res : no(`D4 is goed! Trek de verbeterde formule door tot D9: D${r} werkt nog niet zoals D4.`); }
+            return ok();
+          } },
+        { id: 't4', text: 'Voeg een <b>afbeelding</b> toe die past bij je werkblad.',
+          hints: ['Tabblad Invoegen → Afbeeldingen.', 'Kies Stockafbeeldingen of een afbeelding van je computer. Zet ze naast de titel.'],
+          check: ({ sheet }) => { const im = sheet.imageInfo(); return im.floating || im.inCell.length ? ok() : no('Ik vind nog geen afbeelding op je werkblad.'); } },
+        { id: 't5', text: 'Verberg kolom <b>B</b> met de oplossingen.',
+          hints: ['Dat doe je bij de kolomletter.', 'Rechtsklik op de letter B en kies Verbergen.'],
+          check: ({ sheet }) => {
+            if (sheet.colHidden(2)) { const andere = [1, 3, 4].filter(c => sheet.colHidden(c)).map(numToCol); return andere.length ? no(`Je verborg ook kolom ${list(andere)}. Die moet de gebruiker kunnen zien.`) : ok(); }
+            const andere = [1, 3, 4, 5].filter(c => sheet.colHidden(c)).map(numToCol);
+            return no(andere.length ? `Je verborg kolom ${list(andere)}. Verberg kolom B: daar staan de oplossingen.` : 'Kolom B is nog zichtbaar.');
+          } },
+        { id: 't6', text: 'Zet de <b>rasterlijnen</b> uit.',
+          hints: ['Dat vind je op het tabblad Beeld.', 'Tabblad Beeld → haal het vinkje bij Rasterlijnen weg.'],
+          check: ({ sheet }) => sheet.showGrid ? no('De rasterlijnen zijn nog zichtbaar.') : ok() },
+        { id: 't7', text: 'Ontgrendel de antwoordcellen <span class="addr">C4:C9</span>. Alle andere cellen blijven geblokkeerd.',
+          hints: ['Selecteer C4:C9 en open Celeigenschappen (Ctrl + 1).', 'Tabblad Bescherming → haal het vinkje bij Geblokkeerd weg → OK.'],
+          check: ({ sheet }) => {
+            const C = ['C4', 'C5', 'C6', 'C7', 'C8', 'C9'];
+            const still = C.filter(a => sheet.style(a).locked);
+            if (still.length === 6) return no('De antwoordcellen zijn nog geblokkeerd.');
+            if (still.length) return no(`${list(still)} ${still.length > 1 ? 'zijn' : 'is'} nog geblokkeerd. Selecteer C4:C9 helemaal.`);
+            const open = ['B4', 'D4', 'A4', 'B11'].filter(a => !sheet.style(a).locked);
+            if (open.length) return no(`Ook ${list(open)} ${open.length > 1 ? 'zijn' : 'is'} ontgrendeld. Dan kan de gebruiker daar iets veranderen. Ontgrendel alleen C4:C9.`);
+            return ok();
+          } },
+        { id: 't8', text: '<b>Beveilig</b> het blad.',
+          hints: ['Dat vind je op het tabblad Controleren.', 'Controleren → Blad beveiligen → OK. Gebruik je een wachtwoord, schrijf het dan op.'],
+          check: ({ sheet }) => {
+            if (!sheet.isProtected) return no('Het blad is nog niet beveiligd.');
+            if (['C4', 'C5', 'C6'].every(a => sheet.style(a).locked)) return no('Het blad is beveiligd, maar de antwoordcellen zijn nog geblokkeerd. De gebruiker kan dan niets invullen! Hef de beveiliging op, ontgrendel C4:C9 en beveilig opnieuw.');
+            return ok();
+          } }
+      ] };
+    }
+  };
+
+  const MODULES = [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11];
 
   /* Volgende modules (nog te bouwen) – getoond als vooruitblik. */
   const SOON = [
-    { nr: 11, title: 'Klaar voor een gebruiker', short: 'Score tellen, afbeeldingen, blad beveiligen.' },
     { nr: 12, title: 'Project: mijn interactief werkblad', short: 'Je maakt een werkblad voor je klas of voor een andere klas.', project: true }
   ];
 

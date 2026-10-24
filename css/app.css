@@ -365,3 +365,11 @@ table.mini.sample td.n { text-align: right; font-variant-numeric: tabular-nums; 
 table.mini.cf-table td { min-width: 110px; font-family: var(--f-body); font-size: .92rem; }
 table.mini.cf-table td.cf-head { font-weight: 700; padding-inline: 8px; text-align: left; }
 @media (max-width: 480px) { .dv-grid { grid-template-columns: 1fr; } }
+
+/* beveiligings-simulator */
+table.mini.prot-table td { min-width: 90px; font-family: var(--f-body); font-size: .9rem; }
+table.mini td.unlocked { outline: 2px dashed var(--accent); outline-offset: -4px; }
+.prot-type { outline: none; padding: 0; max-width: 360px; }
+.prot-pop { position: static; margin-top: 8px; width: auto; max-width: 320px; }
+.prot-ribbon .rgroup { align-content: start; }
+.prot-ribbon .dv-check { font-size: .95rem; font-weight: 700; padding-top: 6px; }

@@ -66,6 +66,7 @@
     return null;
   }
   function textOf(el) { return el ? (el.textContent || '') : ''; }
+  const isTrue = v => v === '1' || v === 'true';
 
   // ---------- kleuren ----------
   const INDEXED = ['000000','FFFFFF','FF0000','00FF00','0000FF','FFFF00','FF00FF','00FFFF','000000','FFFFFF','FF0000','00FF00','0000FF','FFFF00','FF00FF','00FFFF','800000','008000','000080','808000','800080','008080','C0C0C0','808080','9999FF','993366','FFFFCC','CCFFFF','660066','FF8080','0066CC','CCCCFF','000080','FF00FF','FFFF00','00FFFF','800080','800000','008080','0000FF','00CCFF','CCFFFF','CCFFCC','FFFF99','99CCFF','FF99CC','CC99FF','FFCC99','3366FF','33CCCC','99CC00','FFCC00','FF9900','FF6600','666699','969696','003366','339966','003300','333300','993300','993366','333399','333333'];
@@ -256,7 +257,7 @@
         fontId: +(attr(x, 'fontId') || 0), fillId: +(attr(x, 'fillId') || 0), borderId: +(attr(x, 'borderId') || 0),
         numFmtId: +(attr(x, 'numFmtId') || 0),
         align: al ? { h: attr(al, 'horizontal'), v: attr(al, 'vertical'), wrap: attr(al, 'wrapText') === '1' || attr(al, 'wrapText') === 'true', rotate: +(attr(al, 'textRotation') || 0) } : {},
-        locked: (() => { const p = kid(x, 'protection'); return p ? attr(p, 'locked') !== '0' : true; })()
+        locked: (() => { const p = kid(x, 'protection'); return p ? !['0', 'false'].includes(attr(p, 'locked')) : true; })()
       });
     });
     kids(kid(xml, 'dxfs'), 'dxf').forEach(d => {
@@ -275,8 +276,8 @@
     let rowNo = 0;
     kids(sd, 'row').forEach(row => {
       rowNo = attr(row, 'r') ? +attr(row, 'r') : rowNo + 1;
-      if (attr(row, 'ht')) rowsInfo[rowNo] = { ht: parseFloat(attr(row, 'ht')), custom: attr(row, 'customHeight') === '1', hidden: attr(row, 'hidden') === '1' };
-      else if (attr(row, 'hidden') === '1') rowsInfo[rowNo] = { hidden: true };
+      if (attr(row, 'ht')) rowsInfo[rowNo] = { ht: parseFloat(attr(row, 'ht')), custom: isTrue(attr(row, 'customHeight')), hidden: isTrue(attr(row, 'hidden')) };
+      else if (isTrue(attr(row, 'hidden'))) rowsInfo[rowNo] = { hidden: true };
       let colNo = 0;
       kids(row, 'c').forEach(c => {
         const p = attr(c, 'r') ? parseAddr(attr(c, 'r')) : { c: colNo + 1, r: rowNo };
@@ -290,7 +291,7 @@
         else if (t === 'b') v = vEl ? textOf(vEl) === '1' : null;
         else if (t === 'e') v = vEl ? textOf(vEl) : null;
         else v = vEl && textOf(vEl) !== '' ? parseFloat(textOf(vEl)) : null;
-        cells[addr(p.c, p.r)] = { v, t, f: fEl ? textOf(fEl) : null, ft: fEl ? attr(fEl, 't') : null, si: fEl ? attr(fEl, 'si') : null, s: +(attr(c, 's') || 0) };
+        cells[addr(p.c, p.r)] = { vm: attr(c, 'vm'), v, t, f: fEl ? textOf(fEl) : null, ft: fEl ? attr(fEl, 't') : null, si: fEl ? attr(fEl, 'si') : null, s: +(attr(c, 's') || 0) };
       });
     });
     // gedeelde formules: Excel bewaart de formule één keer en verwijst ernaar vanuit de andere cellen
@@ -305,7 +306,7 @@
     const cols = [];
     kids(kid(sx, 'cols'), 'col').forEach(c => cols.push({
       min: +attr(c, 'min'), max: +attr(c, 'max'), width: attr(c, 'width') ? parseFloat(attr(c, 'width')) : null,
-      custom: attr(c, 'customWidth') === '1', bestFit: attr(c, 'bestFit') === '1', hidden: attr(c, 'hidden') === '1', s: +(attr(c, 'style') || 0)
+      custom: isTrue(attr(c, 'customWidth')), bestFit: isTrue(attr(c, 'bestFit')), hidden: isTrue(attr(c, 'hidden')), s: +(attr(c, 'style') || 0)
     }));
     const fp = kid(sx, 'sheetFormatPr');
     const defaultColWidth = fp && attr(fp, 'defaultColWidth') ? parseFloat(attr(fp, 'defaultColWidth')) : (fp && attr(fp, 'baseColWidth') ? parseFloat(attr(fp, 'baseColWidth')) + 0.71 : 8.43);
@@ -406,6 +407,12 @@
     const p = parseAddr(a);
     return String(sqref || '').split(/\s+/).filter(Boolean).some(part => { const g = parseRange(part); return p.c >= g.c1 && p.c <= g.c2 && p.r >= g.r1 && p.r <= g.r2; });
   }
+  /* Staat er een afbeelding op het blad (zwevend) of in een cel (Excel 365: "Plaatsen in cel")? */
+  Sheet.prototype.imageInfo = function () {
+    const inCell = Object.keys(this.cells).filter(a => this.cells[a].vm != null);
+    return { floating: this.drawings > 0, inCell };
+  };
+  Sheet.prototype.colHidden = function (colNum) { return this.cols.some(k => colNum >= k.min && colNum <= k.max && k.hidden); };
   Sheet.prototype.dvAt = function (a) { return this.dataValidations.filter(d => inSqref(d.sqref, a)); };
   Sheet.prototype.cfAt = function (a) { return this.conditionalFormats.filter(c => inSqref(c.sqref, a)).sort((x, y) => x.priority - y.priority); };
   /* Welke opmaak krijgt cel a volgens de voorwaardelijke opmaak, als er 'value' in zou staan? */
