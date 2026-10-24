@@ -408,13 +408,17 @@
           hints: ['De letterkleur is de A met een gekleurde streep eronder.', 'Klik op het pijltje naast de A en kies de kleur.'],
           check: ({ sheet }) => {
             const s = sheet.style(c);
-            return colorNames(s.fontColor).includes(d.fontKleur) ? ok() : no(kleurMsg(s.fontColor, 'letterkleur') + ` Kies ${d.fontKleur}.`);
+            if (colorNames(s.fontColor).includes(d.fontKleur)) return ok();
+            if (colorNames(s.fill).includes(d.fontKleur)) return no(`Je kleurde de achtergrond ${d.fontKleur}. Hier moeten de letters zelf ${d.fontKleur} worden: gebruik de A met de kleurstreep.`);
+            return no(kleurMsg(s.fontColor, 'letterkleur') + ` Kies ${d.fontKleur}.`);
           } },
         { id: 't4', text: `Kleur de cel <span class="addr">${c}</span> <b>${d.vulKleur}</b> (de achtergrond van de cel).`,
           hints: ['De achtergrond kleur je met de verfemmer.', 'Klik op het pijltje naast de verfemmer en kies de kleur.'],
           check: ({ sheet }) => {
             const s = sheet.style(c);
-            return colorNames(s.fill).includes(d.vulKleur) ? ok() : no(kleurMsg(s.fill, 'opvulkleur') + ` Kies ${d.vulKleur}.`);
+            if (colorNames(s.fill).includes(d.vulKleur)) return ok();
+            if (!s.fill && colorNames(s.fontColor).includes(d.vulKleur)) return no(`Je kleurde de letters ${d.vulKleur}. Hier moet de achtergrond van de cel ${d.vulKleur} worden: gebruik de verfemmer.`);
+            return no(kleurMsg(s.fill, 'opvulkleur') + ` Kies ${d.vulKleur}.`);
           } },
         { id: 't5', text: `Maak rij <b>${d.row}</b> ongeveer <b>twee keer zo hoog</b>.`,
           hints: ['De hoogte van een rij pas je aan bij de rijnummers, links.', `Sleep de lijn onder het rijnummer ${d.row} naar beneden.`],
@@ -449,17 +453,19 @@
             const s = sheet.style('B2');
             return s.size === d.size ? ok() : no(`De titel heeft nu lettergrootte ${s.size || 11}. Kies ${d.size}.`);
           } },
-        { id: 't9', text: `Maak de kopjes <span class="addr">B4:D4</span> <b>vet</b> en kleur ze <b>${d.kopKleur}</b>.`,
-          hints: ['Selecteer de drie cellen samen: sleep van B4 tot D4.', 'Klik daarna op B (vet) en kies de kleur bij de verfemmer.'],
+        { id: 't9', text: `Maak de kopjes <span class="addr">B4:D4</span> <b>vet</b> en geef de cellen een <b>${d.kopKleur} achtergrond</b> (opvulkleur).`,
+          hints: ['Selecteer de drie cellen samen: sleep van B4 tot D4.', 'Klik daarna op B (vet). De achtergrond kleur je met de verfemmer, niet met de A.'],
           check: ({ sheet }) => {
             const notBold = [], notKleur = [];
             eachCell('B4:D4', a => { const s = sheet.style(a); if (!s.bold) notBold.push(a); if (!colorNames(s.fill).includes(d.kopKleur)) notKleur.push(a); });
             if (!notBold.length && !notKleur.length) return ok();
-            if (notBold.length === 3 && notKleur.length === 3) return no(`De kopjes zijn nog niet vet en nog niet ${d.kopKleur}.`);
+            const fontOnly = notKleur.length && notKleur.every(a => !sheet.style(a).fill && colorNames(sheet.style(a).fontColor).includes(d.kopKleur));
+            if (fontOnly) return no(`Je gaf de letters de kleur ${d.kopKleur}. De opdracht vraagt de achtergrond van de cellen: gebruik de verfemmer (opvulkleur).${notBold.length ? ' Maak ze ook nog vet.' : ''}`);
+            if (notBold.length === 3 && notKleur.length === 3) return no(`De kopjes zijn nog niet vet en hebben nog geen ${d.kopKleur} achtergrond.`);
             const p = [];
             const wie = arr => arr.length === 3 ? 'De kopjes zijn' : `${list(arr)} ${arr.length > 1 ? 'zijn' : 'is'}`;
             if (notBold.length) p.push(`${wie(notBold)} nog niet vet`);
-            if (notKleur.length) p.push(`${p.length ? wie(notKleur).toLowerCase() : wie(notKleur)} nog niet ${d.kopKleur}`);
+            if (notKleur.length) p.push(`${p.length ? wie(notKleur).toLowerCase() : wie(notKleur)} nog niet ${d.kopKleur} gekleurd (achtergrond)`);
             return no(p.join('; ') + '.');
           } },
         { id: 't10', text: `Zet <b>alle randen</b> rond de tabel <span class="addr">B4:D8</span>: een lijn rond elke cel.`,
