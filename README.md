@@ -17,7 +17,7 @@ De opslag (leerlingen, voortgang, opgeladen Excel-bestanden) gebeurt in **Netlif
 
 Open je `index.html` zonder Netlify (bv. lokaal), dan start de app in **demomodus**: alles blijft in die browser, het leerkrachtwachtwoord is dan `demo`.
 
-## Stappen die klaar zijn
+## De 12 stappen
 
 1. Rijen, kolommen en cellen
 2. Typen, verbeteren en kolombreedte
@@ -30,6 +30,7 @@ Open je `index.html` zonder Netlify (bv. lokaal), dan start de app in **demomodu
 9. Excel kiest: ALS (juist/jammer, lege cel, ALS in een ALS, boodschap bij een score)
 10. Keuzelijsten en kleuren die reageren (gegevensvalidatie, eigen foutmelding, voorwaardelijke opmaak, kleuren in het rapport)
 11. Klaar voor een gebruiker (AANTAL.ALS, SPATIES.WISSEN, score in procent, afbeelding, kolom verbergen, rasterlijnen, ontgrendelen en beveiligen)
+12. Project: mijn interactief werkblad (eigen werkblad voor de eigen of een andere klas, minstens 10 vragen met rekenen én taal/WO, drie niveaus ★ ★★ ★★★, tussentijds nakijken, testronde door een klasgenoot, inleveren)
 
 Het ontwerp van elke stap staat in de map `docs/`.
 
@@ -40,6 +41,8 @@ Het ontwerp van elke stap staat in de map `docs/`.
 - **Ik kan dit al**: een leerling mag meteen naar de test. De volgende stap gaat open als de test gehaald is.
 - **Elke leerling krijgt andere opdrachten** (andere cellen, woorden, kleuren). De leerkracht ziet precies welke.
 - **Opladen**: twee routes (map OneDrive zichtbaar of niet). De app waarschuwt bij een oud bestand of een onveranderd startbestand.
+- **Stap 12** is gedifferentieerd. De leerling kiest een niveau (★ Basis, ★★ Gevorderd, ★★★ Expert) en mag altijd wisselen. Bij *Tussentijds nakijken* laadt hij zo vaak op als hij wil, met tips. Bij *Inleveren* vult hij eerst in wie zijn werkblad testte en welke tip hij kreeg. Het werkblad is goedgekeurd als alles van ★ in orde is; de leerkracht ziet het niveau, de behaalde sterren, de tester en de tip.
+- **Vrije opbouw in stap 12**: de app zoekt zelf de vragen (elke ALS-formule die naar een antwoordcel kijkt) en speelt daarna gebruiker: ze vult in gedachten alles juist, fout en leeg in en rekent het hele werkblad door (feedback, score, procent, eindboodschap, kleuren). Oplossingen mogen in een verborgen kolom, op een verborgen blad of in de formule zelf staan.
 - **Verder werken**: het laatst opgeladen bestand is op elk toestel opnieuw te downloaden.
 
 ## Wat de app in een Excel-bestand controleert

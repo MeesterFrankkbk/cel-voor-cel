@@ -16,7 +16,8 @@
     'SOM': 'SUM', 'GEMIDDELDE': 'AVERAGE', 'MIN': 'MIN', 'MAX': 'MAX', 'MEDIAAN': 'MEDIAN', 'AANTAL': 'COUNT', 'AANTALARG': 'COUNTA',
     'AANTAL.LEGE.CELLEN': 'COUNTBLANK', 'AFRONDEN': 'ROUND', 'AFRONDEN.NAAR.BOVEN': 'ROUNDUP', 'AFRONDEN.NAAR.BENEDEN': 'ROUNDDOWN', 'INTEGER': 'INT', 'ABS': 'ABS',
     'ALS': 'IF', 'EN': 'AND', 'OF': 'OR', 'NIET': 'NOT', 'AANTAL.ALS': 'COUNTIF', 'SOM.ALS': 'SUMIF', 'ALS.FOUT': 'IFERROR',
-    'SPATIES.WISSEN': 'TRIM', 'KLEINE.LETTERS': 'LOWER', 'HOOFDLETTERS': 'UPPER', 'LENGTE': 'LEN', 'TEKST.SAMENVOEGEN': 'CONCATENATE', 'RANG': 'RANK', 'GROOTSTE': 'LARGE', 'KLEINSTE': 'SMALL'
+    'SPATIES.WISSEN': 'TRIM', 'KLEINE.LETTERS': 'LOWER', 'HOOFDLETTERS': 'UPPER', 'LENGTE': 'LEN', 'TEKST.SAMENVOEGEN': 'CONCATENATE', 'RANG': 'RANK', 'GROOTSTE': 'LARGE', 'KLEINSTE': 'SMALL',
+    'ISLEEG': 'ISBLANK', 'ISGETAL': 'ISNUMBER', 'ISTEKST': 'ISTEXT', 'WAARDE': 'VALUE', 'GELIJK': 'EXACT', 'ALS.VOORWAARDEN': 'IFS', 'WAAR': 'TRUE', 'ONWAAR': 'FALSE'
   };
   const EN_NL = Object.fromEntries(Object.entries(NL_EN).map(([a, b]) => [b, a]));
   const TRUE_NAMES = { en: ['TRUE'], nl: ['WAAR'] }, FALSE_NAMES = { en: ['FALSE'], nl: ['ONWAAR'] };
@@ -65,6 +66,11 @@
         const j = s.indexOf("'!", i + 1);
         if (j > 0) { sheet = s.slice(i + 1, j).replace(/''/g, "'"); i = j + 2; }
       }
+      // hele kolom, bv. D:D (de app rekent met de eerste 1000 rijen)
+      const colM = /^\$?([A-Za-z]{1,3}):\$?([A-Za-z]{1,3})(?![A-Za-z0-9_(!])/.exec(s.slice(i));
+      if (colM && !/[A-Za-z0-9_.]/.test(s[i - 1] || '')) {
+        out.push({ t: 'range', a: colM[1].toUpperCase() + '1', b: colM[2].toUpperCase() + '1000', sheet }); i += colM[0].length; continue;
+      }
       const idM = /^[A-Za-z_À-ɏ][A-Za-z0-9_.À-ɏ]*/.exec(s.slice(i)) || /^\$?[A-Za-z]{1,3}\$?\d+/.exec(s.slice(i));
       if (idM) {
         let id = idM[0];
@@ -78,7 +84,7 @@
           else out.push({ t: 'ref', v: id, sheet });
           continue;
         }
-        if (s[i] === '(') { out.push({ t: 'func', v: id.toUpperCase() }); i++; continue; }
+        if (s[i] === '(') { out.push({ t: 'func', v: id.toUpperCase().replace(/^_XL(FN|WS)\./, '').replace(/^_XLFN\./, '') }); i++; continue; }
         out.push({ t: 'name', v: id.toUpperCase() });
         continue;
       }
@@ -260,6 +266,13 @@
         if (!pick) return false;
         const v = scalar(ev(pick)); return v == null ? 0 : v;
       }
+      if (name === 'IFS') {
+        for (let k = 0; k + 1 < n.args.length; k += 2) {
+          const c = scalar(ev(n.args[k])); if (isErr(c)) return c;
+          if (typeof c === 'number' ? c !== 0 : c === true) { const v = scalar(ev(n.args[k + 1])); return v == null ? 0 : v; }
+        }
+        return new Err('#N/A');
+      }
       if (name === 'IFERROR') { const v = scalar(ev(n.args[0])); return isErr(v) ? scalar(ev(n.args[1])) : v; }
       const args = n.args.map(ev);
       const firstErr = args.find(a => isErr(a));
@@ -295,6 +308,13 @@
           const s = args[2] && args[2].range ? args[2] : r; let t = 0;
           r.values.forEach((v, k) => { if (f(v) && typeof s.values[k] === 'number') t += s.values[k]; }); return r15(t);
         }
+        case 'TRUE': return true;
+        case 'FALSE': return false;
+        case 'ISBLANK': return scalar(args[0]) == null;
+        case 'ISNUMBER': return typeof scalar(args[0]) === 'number';
+        case 'ISTEXT': return typeof scalar(args[0]) === 'string';
+        case 'VALUE': { const v = scalar(args[0]); if (isErr(v)) return v; if (typeof v === 'number') return v; const x = toNum(String(v).trim().replace(',', '.'), 'en'); return x; }
+        case 'EXACT': { if (firstErr) return firstErr; return toText(scalar(args[0]), locale) === toText(scalar(args[1]), locale); }
         case 'TRIM': { const v = scalar(args[0]); return isErr(v) ? v : toText(v, locale).replace(/\s+/g, ' ').trim(); }
         case 'LOWER': { const v = scalar(args[0]); return isErr(v) ? v : toText(v, locale).toLowerCase(); }
         case 'UPPER': { const v = scalar(args[0]); return isErr(v) ? v : toText(v, locale).toUpperCase(); }
@@ -321,14 +341,15 @@
 
   // ---------------- wat staat er in een formule? ----------------
   function info(src, locale) {
-    const res = { cells: [], ranges: [], funcs: [], numbers: [], hasRef: false, sheets: [], error: null, badNames: [] };
+    const res = { cells: [], refs: [], ranges: [], funcs: [], numbers: [], strings: [], hasRef: false, sheets: [], error: null, badNames: [] };
     let ast;
     try { ast = parse(src, locale); } catch (e) { res.error = isErr(e) ? e.error : 'parse'; return res; }
     (function walk(n) {
       if (!n) return;
       switch (n.k) {
         case 'num': res.numbers.push(n.v); break;
-        case 'ref': res.hasRef = true; res.cells.push(clean(n.v)); if (n.sheet) res.sheets.push(n.sheet); break;
+        case 'str': res.strings.push(n.v); break;
+        case 'ref': res.hasRef = true; res.cells.push(clean(n.v)); res.refs.push({ a: clean(n.v), sheet: n.sheet || null }); if (n.sheet) res.sheets.push(n.sheet); break;
         case 'range': res.hasRef = true; res.ranges.push(clean(n.a) + ':' + clean(n.b)); expandRange(n.a, n.b).cells.forEach(c => res.cells.push(c)); if (n.sheet) res.sheets.push(n.sheet); break;
         case 'call': res.funcs.push(locale === 'nl' ? (NL_EN[n.name] || n.name) : n.name); n.args.forEach(walk); break;
         case 'bin': walk(n.l); walk(n.r); break;

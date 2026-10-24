@@ -53,8 +53,13 @@
     const ld = m.lessons.filter(l => p.lessons?.[l.id]).length;
     const prA = (s.attempts || []).filter(a => a.moduleId === m.id && a.mode === 'practice');
     const hints = Object.values(p.practice?.hints || {}).reduce((a, b) => a + b, 0);
-    return { p, ld, prA, hints, testBest: p.test?.best, testPassed: !!p.test?.passed, testN: p.test?.attempts || 0, practicePassed: !!p.practice?.passed, skipped: !ld && !prA.length && (p.test?.attempts || 0) > 0 };
+    const seed = p.practice?.seed || p.test?.seed;
+    const level = m.levels && seed ? m.levelOf(seed) : null;
+    return { p, ld, prA, hints, testBest: p.test?.best, testPassed: !!p.test?.passed, testN: p.test?.attempts || 0, practicePassed: !!p.practice?.passed, skipped: !ld && !prA.length && (p.test?.attempts || 0) > 0,
+      level, stars: p.test?.stars || 0, peer: p.peer || null };
   }
+  const TL = (m, mode) => (m.tabLabels && m.tabLabels[mode]) || (mode === 'test' ? 'Test' : 'Oefenen');
+  const starTxt = n => n ? '★'.repeat(n) : 'geen ster';
 
   function renderOverview() {
     clear($app);
@@ -74,8 +79,9 @@
             const st = modStatus(s, m);
             return h('td', {}, h('div', { class: 'mcell' },
               h('div', { class: 'dots', title: `Leren ${st.ld}/${m.lessons.length}` }, m.lessons.map(l => h('span', { class: 'dot' + (st.p.lessons?.[l.id] ? ' on' : '') }))),
-              h('span', { class: 'small' }, 'Oefenen: ', st.practicePassed ? h('b', { style: 'color:var(--ok)' }, '✓') : (st.prA.length ? st.prA.length + '×' : '–'), st.hints ? h('span', { class: 'muted' }, ` · ${st.hints} hulp`) : null),
-              h('span', { class: 'small' }, 'Test: ', st.testN ? h('b', { style: `color:var(--${st.testPassed ? 'ok' : 'bad'})` }, `${st.testBest || 0}%`) : '–', st.testN > 1 ? h('span', { class: 'muted' }, ` (${st.testN}×)`) : null, st.skipped ? h('span', { class: 'chip', style: 'margin-left:4px' }, 'kon het al') : null)));
+              st.level ? h('span', { class: 'small' }, 'Niveau ', h('b', {}, '★'.repeat(st.level))) : null,
+              h('span', { class: 'small' }, m.levels ? 'Tussentijds: ' : 'Oefenen: ', st.practicePassed ? h('b', { style: 'color:var(--ok)' }, '✓') : (st.prA.length ? st.prA.length + '×' : '–'), st.hints ? h('span', { class: 'muted' }, ` · ${st.hints} hulp`) : null),
+              h('span', { class: 'small' }, m.levels ? 'Ingeleverd: ' : 'Test: ', st.testN ? h('b', { style: `color:var(--${st.testPassed ? 'ok' : 'bad'})` }, m.levels ? (st.testPassed ? '✓ ' + starTxt(st.stars) : 'nog niet in orde') : `${st.testBest || 0}%`) : '–', st.testN > 1 ? h('span', { class: 'muted' }, ` (${st.testN}×)`) : null, st.skipped ? h('span', { class: 'chip', style: 'margin-left:4px' }, 'kon het al') : null)));
           }),
           h('td', { class: 'num small' }, fmt(s.lastSeen)))))));
     };
@@ -87,10 +93,10 @@
   }
 
   function exportCsv() {
-    const rows = [['Klas', 'Voornaam', 'Naam'].concat(...MODULES.map(m => [`M${m.nr} lessen`, `M${m.nr} oefenen klaar`, `M${m.nr} oefenpogingen`, `M${m.nr} hulplijnen`, `M${m.nr} test beste %`, `M${m.nr} test geslaagd`, `M${m.nr} testpogingen`]), ['Laatst actief'])];
+    const rows = [['Klas', 'Voornaam', 'Naam'].concat(...MODULES.map(m => [`M${m.nr} lessen`, `M${m.nr} oefenen klaar`, `M${m.nr} oefenpogingen`, `M${m.nr} hulplijnen`, `M${m.nr} test beste %`, `M${m.nr} test geslaagd`, `M${m.nr} testpogingen`].concat(m.levels ? [`M${m.nr} niveau`, `M${m.nr} sterren`, `M${m.nr} getest door`, `M${m.nr} tip`] : [])), ['Laatst actief'])];
     T.students.filter(s => !T.klas || s.klas === T.klas).forEach(s => rows.push([s.klas, s.voornaam, s.naam].concat(...MODULES.map(m => {
       const st = modStatus(s, m);
-      return [`${st.ld}/${m.lessons.length}`, st.practicePassed ? 'ja' : 'nee', st.prA.length, st.hints, st.testBest ?? '', st.testPassed ? 'ja' : 'nee', st.testN];
+      return [`${st.ld}/${m.lessons.length}`, st.practicePassed ? 'ja' : 'nee', st.prA.length, st.hints, st.testBest ?? '', st.testPassed ? 'ja' : 'nee', st.testN].concat(m.levels ? [st.level || '', st.stars || 0, st.peer?.tester || '', st.peer?.tip || ''] : []);
     }), [s.lastSeen ? new Date(s.lastSeen).toLocaleString('nl-BE') : ''])));
     const csv = '﻿' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
     Api.download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `celvoorcel-overzicht${T.klas ? '-' + T.klas : ''}.csv`);
@@ -130,9 +136,13 @@
           } }, 'Stap opnieuw openzetten') : null),
         h('div', { class: 'chips' },
           h('span', { class: 'chip' + (st.ld === m.lessons.length ? ' ok' : '') }, `Leren ${st.ld}/${m.lessons.length}`),
-          h('span', { class: 'chip' + (st.practicePassed ? ' ok' : '') }, `Oefenen ${st.practicePassed ? '✓' : (st.prA.length ? st.prA.length + '× opgeladen' : '–')}`),
+          st.level ? h('span', { class: 'chip go' }, `Niveau ${'★'.repeat(st.level)}`) : null,
+          h('span', { class: 'chip' + (st.practicePassed ? ' ok' : '') }, `${TL(m, 'practice')} ${st.practicePassed ? '✓' : (st.prA.length ? st.prA.length + '× opgeladen' : '–')}`),
           h('span', { class: 'chip' }, `${st.hints} hulplijn${st.hints === 1 ? '' : 'en'}`),
-          h('span', { class: 'chip' + (st.testPassed ? ' ok' : st.testN ? ' bad' : '') }, `Test ${st.testN ? (st.testBest || 0) + '%' : '–'}${st.testPassed ? ' ✓' : ''}`)),
+          m.levels
+            ? h('span', { class: 'chip' + (st.testPassed ? ' ok' : st.testN ? ' bad' : '') }, `${TL(m, 'test')} ${st.testN ? (st.testPassed ? '✓ ' + starTxt(st.stars) : 'nog niet in orde') : '–'}`)
+            : h('span', { class: 'chip' + (st.testPassed ? ' ok' : st.testN ? ' bad' : '') }, `Test ${st.testN ? (st.testBest || 0) + '%' : '–'}${st.testPassed ? ' ✓' : ''}`)),
+        st.peer ? h('p', { class: 'peer' }, h('b', {}, 'Getest door: '), st.peer.tester || '–', st.peer.tip ? [h('br'), h('b', {}, 'Tip van de tester: '), st.peer.tip] : null) : null,
         atts.length ? h('div', { style: 'display:grid;gap:10px' }, atts.map(a => attemptCard(s, m, a))) : h('p', { class: 'muted small' }, 'Nog niets opgeladen.'));
     });
 
@@ -148,19 +158,22 @@
     let tasks = [];
     try { tasks = m.gen(a.seed, a.mode, s).tasks; } catch (e) { /* oude seed */ }
     const pct = a.total ? Math.round(a.score / a.total * 100) : 0;
-    const passed = a.mode === 'test' ? pct >= PASS * 100 : a.score === a.total;
+    const passed = a.mode === 'test' ? (m.passCheck && tasks.length ? m.passCheck(tasks, a.results || []) : pct >= PASS * 100) : a.score === a.total;
+    const stars = m.levels && tasks.length ? m.starsOf(tasks, a.results || []) : null;
     const details = h('ul', { hidden: true }, (a.results || []).map(r => {
       const t = tasks.find(x => x.id === r.id);
       return h('li', {}, h('span', { class: r.ok ? 'y' : 'n' }, r.ok ? '✓' : '✗'), h('span', {}, t ? strip(t.text) : r.id, !r.ok && r.msg ? h('span', { class: 'muted' }, ' — ' + r.msg) : null));
     }));
     const dl = a.fileKey ? h('button', { class: 'btn small', onclick: async () => {
-      try { const d = await Api.tFile(a.fileKey); Api.download(Api.b64ToBlob(d.b64), `${s.klas}_${s.voornaam}_${s.naam}_${m.id}_${a.mode === 'test' ? 'test' : 'oefenen'}.xlsx`.replace(/\s+/g, '-')); }
+      try { const d = await Api.tFile(a.fileKey); Api.download(Api.b64ToBlob(d.b64), `${s.klas}_${s.voornaam}_${s.naam}_${m.id}_${a.mode === 'test' ? (m.levels ? 'ingeleverd' : 'test') : (m.levels ? 'tussentijds' : 'oefenen')}.xlsx`.replace(/\s+/g, '-')); }
       catch (e) { dl.after(h('span', { class: 'small', style: 'color:var(--bad)' }, ' ' + e.message)); }
     } }, '⤓ Bestand') : null;
     return h('div', { class: 'att' },
       h('div', { class: 'att-head' },
-        h('span', { class: 'chip' + (a.mode === 'test' ? ' go' : '') }, a.mode === 'test' ? 'Test' : 'Oefenen'),
-        h('b', { style: `color:var(--${passed ? 'ok' : 'bad'})` }, `${a.score}/${a.total}${a.mode === 'test' ? ` (${pct}%)` : ''}`),
+        h('span', { class: 'chip' + (a.mode === 'test' ? ' go' : '') }, TL(m, a.mode)),
+        m.levels ? h('span', { class: 'chip' }, 'Niveau ' + '★'.repeat(m.levelOf(a.seed))) : null,
+        h('b', { style: `color:var(--${passed ? 'ok' : 'bad'})` }, `${a.score}/${a.total}${a.mode === 'test' && !m.levels ? ` (${pct}%)` : ''}`),
+        stars != null ? h('span', { class: 'small' }, 'behaald: ', h('b', {}, starTxt(stars))) : null,
         h('span', { class: 'small muted' }, fmt(a.at)),
         a.mode === 'practice' && a.hints ? h('span', { class: 'small muted' }, `${a.hints} hulplijnen gebruikt`) : null,
         a.fileName ? h('span', { class: 'small addr' }, a.fileName) : null,

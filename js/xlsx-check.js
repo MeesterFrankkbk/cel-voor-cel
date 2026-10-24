@@ -257,7 +257,8 @@
         fontId: +(attr(x, 'fontId') || 0), fillId: +(attr(x, 'fillId') || 0), borderId: +(attr(x, 'borderId') || 0),
         numFmtId: +(attr(x, 'numFmtId') || 0),
         align: al ? { h: attr(al, 'horizontal'), v: attr(al, 'vertical'), wrap: attr(al, 'wrapText') === '1' || attr(al, 'wrapText') === 'true', rotate: +(attr(al, 'textRotation') || 0) } : {},
-        locked: (() => { const p = kid(x, 'protection'); return p ? !['0', 'false'].includes(attr(p, 'locked')) : true; })()
+        locked: (() => { const p = kid(x, 'protection'); return p ? !['0', 'false'].includes(attr(p, 'locked')) : true; })(),
+        hiddenF: (() => { const p = kid(x, 'protection'); return p ? isTrue(attr(p, 'hidden')) : false; })()
       });
     });
     kids(kid(xml, 'dxfs'), 'dxf').forEach(d => {
@@ -374,7 +375,7 @@
       size: font.size, fontName: font.name, fontColor: font.color || null, fill,
       h: xf.align.h || null, v: xf.align.v || null, wrap: !!xf.align.wrap, rotate: xf.align.rotate || 0,
       border, numFmtId: xf.numFmtId, numFmt: this.styles.numFmts[xf.numFmtId] || BUILTIN_FMT[xf.numFmtId] || 'General',
-      locked: xf.locked !== false
+      locked: xf.locked !== false, hiddenFormula: !!xf.hiddenF
     };
   };
   /* De formule in een cel (zonder =), of null. */
@@ -402,6 +403,33 @@
     this._memo[a] = v;
     return v;
   };
+  /* Wat-als: rekent cel a uit alsof sommige cellen (over: { 'C4': waarde } op dit blad) iets anders bevatten.
+     Alle formules die ervan afhangen, worden opnieuw berekend (feedback → score → procent …). */
+  Sheet.prototype.calcWith = function (a, over) {
+    const o = {}, me = this.name.toLowerCase();
+    Object.entries(over || {}).forEach(([k, v]) => { o[k.includes('!') ? k.toLowerCase() : me + '!' + k.toLowerCase()] = v; });
+    const memo = {}, wb = this.wb;
+    const val = (sh, ref, seen) => {
+      ref = String(ref).toUpperCase();
+      const k = sh.name.toLowerCase() + '!' + ref.toLowerCase();
+      if (k in o) return o[k];
+      if (k in memo) return memo[k];
+      const c = sh.cell(ref);
+      if (!c) return null;
+      if (!c.f || !F) return (c.t === 'e' && F) ? new F.Err(c.v) : c.v;
+      if (seen.has(k)) return c.v;
+      seen.add(k);
+      let v;
+      try {
+        v = F.evaluate(c.f, { locale: 'en', get: (r, sn) => { const s2 = sn ? (wb && wb.sheet(sn)) : sh; return s2 ? val(s2, r, seen) : new F.Err('#REF!'); } });
+      } catch (e) { v = c.v; }
+      seen.delete(k);
+      memo[k] = v;
+      return v;
+    };
+    return val(this, a, new Set());
+  };
+  Sheet.prototype.rowHidden = function (r) { return !!(this.rowsInfo[r] && this.rowsInfo[r].hidden); };
   /* Ligt cel a in een sqref ("A1:B3 D5")? */
   function inSqref(sqref, a) {
     const p = parseAddr(a);

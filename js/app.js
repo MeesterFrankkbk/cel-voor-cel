@@ -114,10 +114,20 @@
   }
 
   // ---------------- leerlijn ----------------
+  const levelNow = m => { const p = prog(m.id); return m.levels && p.practice?.seed ? m.levelOf(p.practice.seed) : null; };
+  const levelInfo = (m, n) => m.levels.find(L => L.n === n) || m.levels[0];
   function moduleChips(m) {
     const p = prog(m.id), chips = [];
     const ld = lessonsDone(m);
     chips.push(h('span', { class: 'chip' + (ld === m.lessons.length ? ' ok' : '') }, `Leren ${ld}/${m.lessons.length}`));
+    if (m.levels) {
+      const lv = levelNow(m);
+      if (lv) chips.push(h('span', { class: 'chip' }, 'Niveau ' + levelInfo(m, lv).stars));
+      if (p.practice?.attempts) chips.push(h('span', { class: 'chip go' }, `Nagekeken: ${p.practice.attempts}×`));
+      if (p.test?.passed) chips.push(h('span', { class: 'chip ok' }, `Ingeleverd ✓ ${'★'.repeat(p.test.stars || 0)}`));
+      else if (p.test?.attempts) chips.push(h('span', { class: 'chip bad' }, 'Inleveren: nog niet in orde'));
+      return chips;
+    }
     if (p.practice?.passed) chips.push(h('span', { class: 'chip ok' }, 'Oefenen ✓'));
     else if (p.practice?.attempts) chips.push(h('span', { class: 'chip go' }, `Oefenen: ${p.practice.attempts}× opgeladen`));
     if (p.test?.passed) chips.push(h('span', { class: 'chip ok' }, `Test ${p.test.best}% ✓`));
@@ -138,10 +148,9 @@
     const soon = SOON.map(s => h('div', { class: 'mrow soon' + (s.project ? ' project' : '') }, h('div', { class: 'rn' }, s.nr), h('div', { class: 'mb' }, h('h3', {}, s.title), h('p', { class: 'small' }, s.short))));
     $app.append(
       h('div', { class: 'home-head' },
-        h('div', {}, h('h1', {}, `Dag ${S.student.voornaam}!`), h('p', { class: 'muted' }, allDone ? 'Je hebt alle stappen die nu klaarstaan gehaald. Knap!' : 'Dit is jouw leerlijn. Werk de stappen van boven naar onder af.'))),
+        h('div', {}, h('h1', {}, `Dag ${S.student.voornaam}!`), h('p', { class: 'muted' }, allDone ? (SOON.length ? 'Je hebt alle stappen die nu klaarstaan gehaald. Knap!' : `Je hebt alle ${MODULES.length} stappen gehaald. Proficiat, je bent een echte Excel-kenner!`) : 'Dit is jouw leerlijn. Werk de stappen van boven naar onder af.'))),
       h('div', { class: 'path' }, rows),
-      h('p', { class: 'sep-label' }, 'Komt later'),
-      h('div', { class: 'path' }, soon));
+      ...(SOON.length ? [h('p', { class: 'sep-label' }, 'Komt later'), h('div', { class: 'path' }, soon)] : []));
   }
 
   // ---------------- module ----------------
@@ -159,7 +168,7 @@
     const TL = m.tabLabels || {};
     const tabs = [['learn', 'Leren', lessonsDone(m) === m.lessons.length], ['practice', TL.practice || 'Oefenen in Excel', !!p.practice?.passed], ['test', TL.test || 'Test', !!p.test?.passed]];
     const tabBar = h('div', { class: 'tabs', role: 'tablist' },
-      tabs.map(([id, label, done], i) => h('button', { class: 'tab', role: 'tab', 'aria-selected': String(S.tab === id), onclick: () => { S.tab = id; render(); } }, h('span', { class: 'n' }, i + 1), label, done ? h('span', { class: 'done', 'aria-label': 'klaar' }, '✓') : null)));
+      tabs.map(([id, label, done], i) => h('button', { class: 'tab', role: 'tab', 'aria-selected': String(S.tab === id), onclick: () => { S.tab = id; render(); } }, h('span', { class: 'n' }, i + 1), m.tabShort && m.tabShort[id] ? [h('span', { class: 'tl-long' }, label), h('span', { class: 'tl-short' }, m.tabShort[id])] : label, done ? h('span', { class: 'done', 'aria-label': 'klaar' }, '✓') : null)));
     const skip = S.tab !== 'test' && !p.test?.passed ? h('button', { class: 'btn ghost small skip', onclick: () => { S.tab = 'test'; render(); } }, m.project ? `Meteen naar ${(TL.test || 'de test').toLowerCase()} →` : 'Ik kan dit al → naar de test') : null;
     $app.append(
       h('div', { class: 'crumb' }, h('button', { class: 'btn ghost small', onclick: () => { S.view = 'home'; render(); } }, '← Leerlijn')),
@@ -965,6 +974,17 @@
       const tog = (li, k) => { on.has(k) ? on.delete(k) : on.add(k); li.classList.toggle('on', on.has(k)); li.querySelector('.bx').textContent = on.has(k) ? '✓' : ''; li.setAttribute('aria-checked', String(on.has(k))); btn.disabled = on.size !== w.steps.length; };
       return h('div', { class: 'q' }, h('p', { class: 'small muted' }, 'Vink elke stap aan als je hem begrijpt.'), list, h('div', { class: 'btn-row' }, btn));
     },
+    levelPick(w, onDone) {
+      const m = MODULES[modIndex(S.mid)];
+      const box = h('div', { style: 'display:grid;gap:10px' });
+      const draw = () => {
+        const cur = levelNow(m);
+        clear(box).append(levelPicker(m, cur, async n => { await setLevel(m, n); draw(); onDone(); }),
+          h('p', { class: 'small muted' }, cur ? `Je koos ${levelInfo(m, cur).stars} ${levelInfo(m, cur).name}. Wijzigen kan later nog, bij ${m.tabLabels?.practice || 'Oefenen'}.` : 'Klik op het niveau dat bij jou past.'));
+      };
+      draw();
+      return box;
+    },
     read(w, onDone) {
       const btn = h('button', { class: 'btn primary', onclick: () => { btn.disabled = true; onDone(); } }, w.confirm || 'Gelezen');
       return h('div', { class: 'btn-row' }, btn);
@@ -972,12 +992,29 @@
   };
 
   // ---------------- oefenen en test ----------------
+  function levelPicker(m, cur, onPick) {
+    return h('div', { class: 'levels', role: 'radiogroup', 'aria-label': 'Kies je niveau' }, m.levels.map(L =>
+      h('button', { class: 'level' + (L.n === cur ? ' on' : ''), role: 'radio', 'aria-checked': String(L.n === cur), onclick: () => onPick(L.n) },
+        h('span', { class: 'lv-stars', 'aria-hidden': 'true' }, L.stars), h('b', {}, L.name), h('span', { class: 'small' }, L.short),
+        h('ul', {}, L.items.map(x => h('li', {}, x))))));
+  }
+  async function setLevel(m, n) {
+    const p = prog(m.id);
+    if (p.practice?.seed && m.levelOf(p.practice.seed) === n) return;
+    await save(m.id, { practice: { seed: m.withLevel(n), started: p.practice?.started || new Date().toISOString(), passed: false, lastSeed: null, lastResults: null } });
+  }
+  const passedOf = (m, mode, tasks, results) => {
+    const sc = results.filter(r => r.ok).length;
+    if (mode === 'practice') return sc === results.length;
+    return m.passCheck ? m.passCheck(tasks, results) : Math.round(sc / results.length * 100) >= PASS * 100;
+  };
   async function ensureSeed(m, mode) {
     const p = prog(m.id);
+    if (mode === 'practice' && !p.practice?.seed && m.levels) return null;     // eerst een niveau kiezen
     if (mode === 'practice' && !p.practice?.seed) await save(m.id, { practice: { seed: newSeed(), started: new Date().toISOString() } });
     return mode === 'practice' ? prog(m.id).practice.seed : p.test?.seed;
   }
-  function fileWord(m, mode) { return m.project && mode === 'test' ? 'rapport' : mode === 'test' ? 'test' + m.nr : 'module' + m.nr; }
+  function fileWord(m, mode) { if (m.fileWord) return m.fileWord; return m.project && mode === 'test' ? 'rapport' : mode === 'test' ? 'test' + m.nr : 'module' + m.nr; }
 
   async function downloadStart(m, mode, seed) {
     try {
@@ -995,6 +1032,12 @@
     const p = prog(m.id);
     if (mode === 'test' && !p.test?.open) return renderTestGate(m, root);
     const seed = await ensureSeed(m, mode);
+    if (!seed && m.levels) {
+      root.append(h('section', { class: 'sheet pad', style: 'display:grid;gap:12px' }, h('h2', {}, 'Kies eerst je niveau'),
+        h('p', {}, 'Welk werkblad ga je maken? Je kan later nog wisselen.'),
+        levelPicker(m, null, async n => { await setLevel(m, n); render(); })));
+      return;
+    }
     const gen = m.gen(seed, mode, S.student);
     const st = mode === 'practice' ? (prog(m.id).practice || {}) : (prog(m.id).test || {});
     const last = S.results[m.id + mode + seed] || (st.lastSeed === seed ? st.lastResults : null);
@@ -1002,11 +1045,23 @@
     const vn = S.student.voornaam.replace(/\s+/g, '');
     const fname = `${vn}_${fileWord(m, mode)}`;
 
+    // --- niveau ---
+    let lvSec = null;
+    if (m.levels) {
+      const L = levelInfo(m, m.levelOf(seed));
+      const pick = h('div', { hidden: true });
+      lvSec = h('section', { class: 'sheet pad lv-now', style: 'display:grid;gap:10px' },
+        h('div', { class: 'lv-row' }, h('span', { class: 'lv-stars', 'aria-hidden': 'true' }, L.stars), h('div', {}, h('b', {}, (mode === 'test' ? 'Je levert in op niveau ' : 'Mijn niveau: ') + L.name), h('p', { class: 'small muted' }, L.short)),
+          mode === 'practice' ? h('button', { class: 'btn small', onclick: e => { pick.hidden = !pick.hidden; e.currentTarget.textContent = pick.hidden ? 'Ander niveau' : 'Sluiten'; } }, 'Ander niveau') : null),
+        mode === 'practice' ? pick : null);
+      if (mode === 'practice') pick.append(levelPicker(m, L.n, async n => { await setLevel(m, n); render(); }), h('p', { class: 'small muted' }, 'Na een wissel laad je je werkblad gewoon opnieuw op.'));
+    }
     // --- zo begin je ---
     const start = h('section', { class: 'sheet pad', style: 'display:grid;gap:12px' },
       h('h2', {}, mode === 'test' ? (m.tabLabels?.test || 'Je test') : 'Zo begin je'),
-      mode === 'test' ? h('p', { class: 'msg info' }, m.project ? 'Geen hulplijnen. De app kijkt na of je rapport goed rekent en goed opgebouwd is. Je hebt ' : 'Dit is de test: er zijn geen hulplijnen. Lees elke opdracht goed. Je hebt ', h('b', {}, Math.round(PASS * 100) + '%'), ' nodig.') : null,
-      m.newFile
+      mode === 'test' ? h('p', { class: 'msg info' }, m.testIntro ? m.testIntro : [m.project ? 'Geen hulplijnen. De app kijkt na of je rapport goed rekent en goed opgebouwd is. Je hebt ' : 'Dit is de test: er zijn geen hulplijnen. Lees elke opdracht goed. Je hebt ', h('b', {}, Math.round(PASS * 100) + '%'), ' nodig.']) : null,
+      m.route ? h('ol', { class: 'route' }, m.route[mode].map(x => h('li', { html: x.replace('{fname}', fname) })))
+      : m.newFile
         ? h('ol', { class: 'route' }, h('li', { html: 'Start <b>Excel</b> en kies <b>Lege werkmap</b>.' }), h('li', { html: 'Doe de opdrachten hieronder.' }), h('li', { html: `Bewaar via <b>Bestand → Opslaan als → OneDrive</b> met de naam <span class="addr">${fname}</span>.` }))
         : h('div', { style: 'display:grid;gap:10px' },
           h('ol', { class: 'route' },
@@ -1035,7 +1090,7 @@
       drawHints(lvl);
       return h('li', { class: 'task' + (r ? (r.ok ? ' ok' : ' bad') : '') },
         h('div', { class: 'tn' }, r ? (r.ok ? '✓' : '✗') : k + 1),
-        h('div', { class: 'tb' }, h('div', { class: 'ttext', html: t.text }), r ? h('p', { class: 'res' }, r.ok ? 'Juist!' : r.msg) : null, hintBox));
+        h('div', { class: 'tb' }, t.lvl > 1 ? h('span', { class: 'lvl-tag', title: 'vanaf niveau ' + '★'.repeat(t.lvl) }, '★'.repeat(t.lvl)) : null, h('div', { class: 'ttext', html: t.text }), r ? h('p', { class: 'res' }, r.ok ? (m.project ? (r.msg && r.msg !== 'Juist!' ? r.msg : 'In orde!') : 'Juist!') : r.msg) : null, hintBox));
     }));
 
     // --- opladen ---
@@ -1043,24 +1098,59 @@
     const total = gen.tasks.length;
     if (last) {
       const sc = last.filter(r => r.ok).length, pct = Math.round(sc / total * 100);
-      const passed = mode === 'test' ? pct >= PASS * 100 : sc === total;
+      const passed = passedOf(m, mode, gen.tasks, last);
+      const noun = m.noun || 'rapport', TLt = (m.tabLabels?.test || 'de test').toLowerCase();
+      const stars = m.levels ? m.starsOf(gen.tasks, last) : null;
       side.append(h('section', { class: 'sheet pad pop', style: 'display:grid;gap:10px' },
-        h('div', { class: 'score' }, h('b', {}, `${sc}/${total}`), h('span', {}, mode === 'test' ? pct + '%' : 'juist')),
+        h('div', { class: 'score' }, h('b', {}, `${sc}/${total}`), h('span', {}, mode === 'test' && !m.levels ? pct + '%' : (m.project ? 'in orde' : 'juist'))),
         h('div', { class: 'bar' }, h('i', { style: `width:${pct}%` })),
+        m.levels ? h('p', { class: 'stars-got' }, stars ? h('span', {}, 'Je haalt ', h('b', { class: 'lv-stars' }, '★'.repeat(stars)), stars < m.levelOf(seed) ? ` van de ${'★'.repeat(m.levelOf(seed))}` : '') : 'Nog geen ster: zorg eerst dat alle opdrachten zonder ★ in orde zijn.') : null,
         passed
-          ? h('p', { class: 'msg ok' }, mode === 'test' ? h('span', {}, h('b', {}, 'Geslaagd! '), modIndex(m.id) < MODULES.length - 1 ? 'De volgende stap is open.' : 'Je hebt alle stappen gehaald.') : h('span', {}, h('b', {}, 'Alles juist! '), 'Je bent klaar voor de test.'))
-          : h('p', { class: 'msg info' }, mode === 'test' ? (m.project ? 'Nog niet in orde. Verbeter de onderdelen met een ✗ in je rapport en laad het opnieuw op.' : 'Nog niet geslaagd. Oefen de opdrachten met een ✗ nog eens en start daarna een nieuwe test.') : 'Verbeter de opdrachten met een ✗ in Excel, bewaar en laad opnieuw op.'),
-        passed && mode === 'practice' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => { S.tab = 'test'; render(); window.scrollTo(0, 0); } }, 'Naar de test →'), h('button', { class: 'btn', onclick: async () => { await save(m.id, { practice: { seed: newSeed(), started: new Date().toISOString(), lastSeed: null, lastResults: null } }); render(); } }, 'Nieuwe oefeningen')) : null,
+          ? h('p', { class: 'msg ok' }, mode === 'test' ? h('span', {}, h('b', {}, m.levels ? 'Goedgekeurd! ' : 'Geslaagd! '), modIndex(m.id) < MODULES.length - 1 ? 'De volgende stap is open.' : (m.levels ? 'Je werkblad is ingeleverd. Je hebt alle stappen gehaald!' : 'Je hebt alle stappen gehaald.')) : h('span', {}, h('b', {}, 'Alles in orde! '), m.levels ? 'Laat een klasgenoot je werkblad testen en lever het daarna in.' : 'Je bent klaar voor de test.'))
+          : h('p', { class: 'msg info' }, mode === 'test' ? (m.project ? `Nog niet in orde. Verbeter de onderdelen met een ✗ in je ${noun} en laad het opnieuw op.` : 'Nog niet geslaagd. Oefen de opdrachten met een ✗ nog eens en start daarna een nieuwe test.') : 'Verbeter de opdrachten met een ✗ in Excel, bewaar en laad opnieuw op.'),
+        passed && mode === 'practice' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => { S.tab = 'test'; render(); window.scrollTo(0, 0); } }, `Naar ${TLt} →`), m.levels ? null : h('button', { class: 'btn', onclick: async () => { await save(m.id, { practice: { seed: newSeed(), started: new Date().toISOString(), lastSeed: null, lastResults: null } }); render(); } }, 'Nieuwe oefeningen')) : null,
         passed && mode === 'test' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => { S.view = 'home'; render(); } }, 'Naar de leerlijn →')) : null,
-        !passed && mode === 'test' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: () => { S.tab = 'practice'; render(); } }, 'Oefenen'), h('button', { class: 'btn primary', onclick: () => startTest(m) }, m.project ? 'Opnieuw opladen' : 'Nieuwe test')) : null));
+        !passed && mode === 'test' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: () => { S.tab = 'practice'; render(); } }, m.tabLabels?.practice || 'Oefenen'), h('button', { class: 'btn primary', onclick: () => startTest(m) }, m.project ? 'Opnieuw opladen' : 'Nieuwe test')) : null));
     }
     const testFinished = mode === 'test' && last;
     if (!testFinished) side.append(uploadPanel(m, mode, seed, gen, fname));
 
-    root.append(h('div', { class: 'work' }, h('div', { style: 'display:grid;gap:16px;min-width:0' }, start, h('section', { style: 'display:grid;gap:10px' }, h('h2', {}, 'Opdrachten'), tasks)), side));
+    root.append(h('div', { class: 'work' }, h('div', { style: 'display:grid;gap:16px;min-width:0' }, lvSec, start, h('section', { style: 'display:grid;gap:10px' }, h('h2', {}, 'Opdrachten'), tasks)), side));
   }
 
+  function renderGateChecks(m, root) {
+    const p = prog(m.id).test || {}, peer = prog(m.id).peer || {};
+    const lv = levelNow(m);
+    const box = h('section', { class: 'sheet pad gate', style: 'display:grid;gap:12px' });
+    root.append(box);
+    box.append(h('h2', {}, p.passed ? `Je ${m.noun} is ingeleverd ${'★'.repeat(p.stars || 0)}` : `Klaar om je ${m.noun} in te leveren?`));
+    if (!lv) { box.append(h('p', {}, 'Kies eerst je niveau.'), levelPicker(m, null, async n => { await setLevel(m, n); render(); })); return; }
+    const L = levelInfo(m, lv);
+    box.append(h('div', { class: 'lv-row' }, h('span', { class: 'lv-stars', 'aria-hidden': 'true' }, L.stars), h('div', {}, h('b', {}, 'Niveau ' + L.name), h('p', { class: 'small muted' }, `Wil je een ander niveau? Dat kies je bij ${m.tabLabels?.practice || 'Oefenen'}.`))));
+    if (m.gate.intro) box.append(h('div', { html: m.gate.intro }));
+    const btn = h('button', { class: 'btn primary', disabled: true }, p.passed ? 'Opnieuw inleveren' : `Lever mijn ${m.noun} in`);
+    const boxes = m.gate.checks.map((c, k) => h('input', { type: 'checkbox', id: 'gate-c' + k }));
+    const fields = m.gate.fields.map(f => f.area
+      ? h('textarea', { class: 'in', id: 'gate-' + f.id, rows: 2, maxlength: 300 })
+      : h('input', { class: 'in', id: 'gate-' + f.id, maxlength: 60 }));
+    m.gate.fields.forEach((f, k) => { fields[k].value = peer[f.id] || ''; });
+    const upd = () => { btn.disabled = !(boxes.every(b => b.checked) && fields.every(f => f.value.trim())); };
+    box.append(h('ul', { class: 'list-plain gate-checks' }, m.gate.checks.map((c, k) => h('li', {}, h('label', { class: 'chk', for: 'gate-c' + k }, boxes[k], h('span', {}, c))))),
+      h('div', { class: 'form', style: 'display:grid;gap:10px' }, m.gate.fields.map((f, k) => h('label', { class: 'f', for: 'gate-' + f.id }, f.label, fields[k]))),
+      h('p', { class: 'small muted' }, 'Je leerkracht ziet wie testte en welke tip je kreeg.'),
+      h('div', { class: 'btn-row' }, btn, !p.passed ? h('button', { class: 'btn', onclick: () => { S.tab = 'practice'; render(); } }, `Eerst nog ${(m.tabLabels?.practice || 'oefenen').toLowerCase()}`) : null));
+    [...boxes, ...fields].forEach(el => el.addEventListener('input', upd));
+    boxes.forEach(b => b.addEventListener('change', upd));
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const data = { at: new Date().toISOString() };
+      m.gate.fields.forEach((f, k) => { data[f.id] = fields[k].value.trim(); });
+      await save(m.id, { peer: data });
+      startTest(m);
+    });
+  }
   function renderTestGate(m, root) {
+    if (m.gate) return renderGateChecks(m, root);
     const p = prog(m.id).test || {};
     const prev = (S.student.attempts || []).filter(a => a.moduleId === m.id && a.mode === 'test');
     root.append(h('section', { class: 'sheet pad gate' },
@@ -1074,7 +1164,7 @@
       h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => startTest(m) }, m.project ? (p.passed ? 'Opnieuw opladen' : 'Start mijn eigen rapport') : (p.passed ? 'Doe de test opnieuw' : 'Start de test')), !p.passed ? h('button', { class: 'btn', onclick: () => { S.tab = 'practice'; render(); } }, 'Eerst nog oefenen') : null)));
   }
   async function startTest(m) {
-    await save(m.id, { test: { seed: newSeed(), open: true, started: new Date().toISOString(), lastSeed: null, lastResults: null } });
+    await save(m.id, { test: { seed: m.levels ? m.withLevel(levelNow(m) || 1) : newSeed(), open: true, started: new Date().toISOString(), lastSeed: null, lastResults: null } });
     S.tab = 'test'; render(); window.scrollTo(0, 0);
   }
 
@@ -1125,9 +1215,11 @@
       const score = results.filter(r => r.ok).length, total = results.length, pct = Math.round(score / total * 100);
       const hints = Object.values((prog(m.id).practice || {}).hints || {}).reduce((a, b) => a + b, 0);
       const st = mode === 'practice' ? (prog(m.id).practice || {}) : (prog(m.id).test || {});
+      const okNow = passedOf(m, mode, gen.tasks, results);
       const patch = mode === 'practice'
-        ? { practice: { attempts: (st.attempts || 0) + 1, passed: !!st.passed || score === total, lastSeed: seed, lastResults: results } }
-        : { test: { attempts: (st.attempts || 0) + 1, passed: !!st.passed || pct >= PASS * 100, best: Math.max(st.best || 0, pct), lastSeed: seed, lastResults: results, lastPct: pct } };
+        ? { practice: { attempts: (st.attempts || 0) + 1, passed: !!st.passed || okNow, lastSeed: seed, lastResults: results } }
+        : { test: { attempts: (st.attempts || 0) + 1, passed: !!st.passed || okNow, best: Math.max(st.best || 0, pct), lastSeed: seed, lastResults: results, lastPct: pct } };
+      if (m.levels) { const stars = m.starsOf(gen.tasks, results); patch[mode].lastStars = stars; if (mode === 'test') patch.test.stars = Math.max(st.stars || 0, stars); }
       let b64 = null;
       try { b64 = await Api.fileToB64(file); } catch (e) { /* zonder bestand */ }
       try {

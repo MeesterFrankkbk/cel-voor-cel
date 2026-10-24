@@ -1934,12 +1934,507 @@
     }
   };
 
-  const MODULES = [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11];
+  // ======================================================================
+  // MODULE 12 – Project: mijn interactief werkblad
+  // ======================================================================
+  const NIVEAUS = [
+    { n: 1, stars: '★', name: 'Basis', short: 'Een werkblad dat werkt.',
+      items: ['een titel en een uitleg', 'minstens 10 vragen: rekenen én taal of WO', 'feedback met ALS, ook als de cel leeg is', 'een score met AANTAL.ALS', 'groen bij juist, rood bij jammer', 'een vraag met een afbeelding', 'de oplossingen verborgen'] },
+    { n: 2, stars: '★★', name: 'Gevorderd', short: 'Alles van ★, en klaar voor elke gebruiker.',
+      items: ['SPATIES.WISSEN', 'minstens 2 keuzelijsten', 'de score als procent', 'geen rasterlijnen', 'een beveiligd blad'] },
+    { n: 3, stars: '★★★', name: 'Expert', short: 'Alles van ★★, en nog slimmer.',
+      items: ['een eindboodschap die afhangt van de score', 'een score die kleurt', 'een rekenvraag met een eigen foutmelding', 'een keuzelijst met de keuzes uit een bereik'] }
+  ];
+  const levelOf = seed => { const m = /^([123])~/.exec(String(seed || '')); return m ? +m[1] : 1; };
+  const withLevel = (lvl, s) => lvl + '~' + (s || newSeed());
+
+  /* Wat bewaart Excel als de gebruiker dit typt? Een getal wordt een getal (ook met spaties of een komma). */
+  function typedAs(v) {
+    if (isNum(v)) return v;
+    const s = String(v).trim();
+    if (/^-?\d+(,\d+)?$/.test(s)) return parseFloat(s.replace(',', '.'));
+    return String(v);
+  }
+  const JUNK = 'qzx', JUNK2 = 'wvb';
+  const isErrV = v => FX.isErr(v);
+  const blank = v => v == null || String(v).trim() === '';
+  const rowOf = a => parseAddr(a).r, colOf = a => parseAddr(a).c;
+  const cut = (s, n) => { s = String(s); return s.length > (n || 30) ? s.slice(0, (n || 30) - 1) + '…' : s; };
+  const nlFn = fn => FX.EN_NL[fn] || fn;
+  const colsOfStyle = st => [...colorNames(st.fill), ...colorNames(st.font)];
+  const hiddenAt = (sh, a) => sh.state !== 'visible' || sh.colHidden(colOf(a)) || sh.rowHidden(rowOf(a));
+  const lists = (sh, a) => sh.dvAt(a).filter(d => d.type === 'list');
+
+  /* Zoekt de vragen op één blad: feedbackcel (ALS) + antwoordcel + juist antwoord. */
+  function analyzeSheet(sh) {
+    const wb = sh.wb;
+    const res = { sheet: sh, qs: [], unresolved: [], unknown: [], helpers: [] };
+    const byAns = {};
+    for (const F of Object.keys(sh.cells).filter(a => sh.formula(a))) {
+      const inf = FX.info(sh.formula(F), 'en');
+      if (!inf.funcs.includes('IF') && !inf.funcs.includes('IFS')) continue;
+      const own = [...new Set(inf.refs.filter(r => !r.sheet).map(r => r.a))].filter(a => a !== F && !sh.formula(a));
+      if (!own.length) continue;                           // bv. een eindboodschap die naar de score kijkt
+      const unk = inf.funcs.filter(x => !FX.EN_NL[x]);
+      if (unk.length) { res.unknown.push({ F, fn: unk[0] }); continue; }
+      const partners = inf.refs.map(r => ({ a: r.a, sh: r.sheet ? (wb && wb.sheet(r.sheet)) : sh })).filter(r => r.sh);
+      let best = null, questionLike = false;
+      for (const A of own.slice(0, 8)) {
+        const sim = v => sh.calcWith(F, { [A]: v });
+        const oNull = sim(null), oJunk = sim(JUNK);
+        if (isErrV(oJunk) || said(oJunk) !== said(sim(JUNK2))) continue;   // geen vraag (bv. "Dag " & naam)
+        questionLike = true;
+        const cands = [];
+        partners.filter(p => !(p.a === A && p.sh === sh)).forEach(p => cands.push({ v: p.sh.calc(p.a), ref: p }));
+        inf.numbers.forEach(v => cands.push({ v }));
+        inf.strings.forEach(v => cands.push({ v }));
+        let hit = null;
+        const tryIt = (c, t, flag) => {
+          const o = sim(t);
+          if (!isErrV(o) && said(o) !== said(oJunk) && said(o) !== said(oNull)) hit = { sol: c.v, typed: t, solRef: c.ref || null, okRaw: o, textNumber: !!flag };
+        };
+        for (const c of cands) { if (blank(c.v) || isErrV(c.v) || typeof c.v === 'boolean') continue; tryIt(c, typedAs(c.v)); if (hit) break; }
+        if (!hit) for (const c of cands) {    // een getal dat als tekst in de oplossing staat ('42)
+          if (typeof c.v === 'string' && isNum(typedAs(c.v))) { tryIt(c, c.v, true); if (hit) break; }
+        }
+        if (!hit) continue;
+        let score = 0;
+        if (!sh.style(A).locked) score += 2;
+        if (!hiddenAt(sh, A)) score += 1;
+        if (hit.solRef && hiddenAt(hit.solRef.sh, hit.solRef.a)) score += 1;
+        if (said(oNull) !== said(oJunk)) score += 2;
+        if (lists(sh, A).length) score += 2;
+        if (blank(sh.value(A))) score += 1;
+        if (hit.solRef && hit.solRef.sh === sh && colOf(A) > colOf(hit.solRef.a)) score += 0.5;
+        if (!best || score > best.score) best = Object.assign(hit, { score, A, oNull, oJunk });
+      }
+      if (!best) {
+        if (questionLike) res.unresolved.push({ F, trim: inf.funcs.includes('TRIM'), numPartner: partners.some(p => isNum(p.sh.calc(p.a))) || inf.numbers.length > 0 });
+        continue;
+      }
+      const q = { F, ans: best.A, sol: best.sol, typed: best.typed, solRef: best.solRef, textNumber: best.textNumber,
+        okRaw: best.okRaw, okW: said(best.okRaw), badRaw: best.oJunk, badW: said(best.oJunk), emptyRaw: best.oNull, emptyW: isErrV(best.oNull) ? '#' : said(best.oNull),
+        hasList: lists(sh, best.A).length > 0 };
+      (byAns[q.ans] = byAns[q.ans] || []).push(q);
+    }
+    Object.values(byAns).forEach(arr => {
+      arr.sort((x, y) => (numOf(x.okRaw) == null ? 0 : 1) - (numOf(y.okRaw) == null ? 0 : 1));   // woorden ("juist") eerst, punten (1/0) als hulpcel
+      res.qs.push(arr[0]); res.helpers.push(...arr.slice(1));
+    });
+    res.qs.sort((x, y) => rowOf(x.ans) - rowOf(y.ans) || colOf(x.ans) - colOf(y.ans));
+    return res;
+  }
+  /* Het blad met de meeste vragen (bij gelijkspel: het blad met de meeste lege antwoordcellen, zoals een blad "Blanco"). */
+  function analyze(wb) {
+    if (wb._m12) return wb._m12;
+    const all = wb.sheets.map(analyzeSheet);
+    const empties = r => r.qs.filter(q => blank(r.sheet.value(q.ans))).length;
+    const pick = all.slice().sort((x, y) => y.qs.length - x.qs.length || empties(y) - empties(x) || (x.sheet.state === 'visible' ? 0 : 1) - (y.sheet.state === 'visible' ? 0 : 1))[0];
+    const an = pick && pick.qs.length ? pick : (all.find(r => r.sheet === wb.sheet()) || all[0] || { sheet: wb.sheet(), qs: [], unresolved: [], unknown: [], helpers: [] });
+    an.unresolved = an.qs.length ? an.unresolved : all.flatMap(r => r.unresolved.map(u => Object.assign({ sheet: r.sheet }, u)));
+    an.unknown = an.qs.length ? an.unknown : all.flatMap(r => r.unknown);
+    wb._m12 = an;
+    return an;
+  }
+  /* De gebruiker naspelen: alle antwoordcellen tegelijk invullen. */
+  const fillIn = (qs, pick) => { const o = {}; qs.forEach((q, i) => { const s = pick(q, i); o[q.ans] = s === 'ok' ? q.typed : s === 'bad' ? JUNK : null; }); return o; };
+  function scoreInfo(an) {
+    if (an._score) return an._score;
+    const sh = an.sheet, qs = an.qs, n = qs.length;
+    const skip = new Set([...qs.map(q => q.F), ...an.helpers.map(q => q.F)]);
+    const ALL = fillIn(qs, () => 'ok'), NONE = fillIn(qs, () => 'bad'), EMPTY = fillIn(qs, () => 'empty');
+    const half = Math.ceil(n / 2), HALF = fillIn(qs, (q, i) => i < half ? 'ok' : 'bad');
+    const cells = Object.keys(sh.cells).filter(a => sh.formula(a) && !skip.has(a));
+    const list = [];
+    for (const a of cells) {
+      const vA = sh.calcWith(a, ALL), vN = sh.calcWith(a, NONE), vE = sh.calcWith(a, EMPTY);
+      if (!isNum(vA) || !isNum(vN) || !(vA > vN)) continue;
+      const cover = qs.filter((q, i) => { const v = sh.calcWith(a, fillIn(qs, (x, j) => j === i ? 'ok' : 'bad')); return isNum(v) && v > vN; });
+      list.push({ a, vA, vN, vE, vH: sh.calcWith(a, HALF), cover, countif: FX.info(sh.formula(a), 'en').funcs.includes('COUNTIF') });
+    }
+    list.sort((x, y) => y.cover.length - x.cover.length || (y.countif ? 1 : 0) - (x.countif ? 1 : 0) || (Number.isInteger(y.vA) ? 1 : 0) - (Number.isInteger(x.vA) ? 1 : 0));
+    const pct = list.find(x => Math.abs(x.vA - 1) < 1e-9 && x.cover.length === n) || null;
+    const msgs = [];
+    for (const a of cells) {
+      if (list.some(x => x.a === a) || !FX.info(sh.formula(a), 'en').funcs.some(f => f === 'IF' || f === 'IFS')) continue;
+      const oA = sh.calcWith(a, ALL), oN = sh.calcWith(a, NONE);
+      if (isErrV(oA) || isErrV(oN) || blank(oA) || blank(oN)) continue;
+      msgs.push({ a, oA, oN, differs: said(oA) !== said(oN) });
+    }
+    an._score = { list, best: list[0] || null, pct, msgs, ALL, NONE, half, cells };
+    return an._score;
+  }
+  function hasQuestion(sh, q, an) {
+    const p = parseAddr(q.ans), others = new Set([...an.qs.map(x => x.ans), ...an.qs.map(x => x.F)]);
+    for (let c = 1; c < p.c; c++) {
+      const a = addr(c, p.r);
+      if (q.solRef && q.solRef.sh === sh && q.solRef.a === a) continue;
+      if (others.has(a) || sh.colHidden(c)) continue;
+      if (!sh.isEmpty(a) || (sh.cell(a) && sh.cell(a).vm != null)) return true;
+    }
+    const up = addr(p.c, p.r - 1);
+    return p.r > 1 && !others.has(up) && !sh.isEmpty(up);
+  }
+  function unresolvedMsg(an) {
+    const u = an.unresolved[0];
+    if (!u) return '';
+    if (u.trim && u.numPartner) return ` In ${u.F} werkt het juiste antwoord niet: SPATIES.WISSEN maakt van een getal tekst. Zet SPATIES.WISSEN rond het antwoord én rond de oplossing.`;
+    return ` In ${u.F} staat een ALS-formule, maar ik vind geen antwoord dat "juist" geeft. Probeer het zelf: typ het juiste antwoord. Klopt je oplossing?`;
+  }
+  function dvNum(sh, f) {
+    const s = String(f || '').trim().replace(/^=/, '');
+    if (s === '') return null;
+    const n = numOf(s); if (n != null) return n;
+    const v = FX.evaluate(s, { locale: 'en', get: (r, sn) => sn ? (sh.wb && sh.wb.sheet(sn) ? sh.wb.sheet(sn).calc(r) : null) : sh.calc(r) });
+    return isNum(v) ? v : null;
+  }
+  function dvAllows(sh, dv, v) {
+    if (!isNum(v)) return false;
+    if (dv.type === 'whole' && !Number.isInteger(v)) return false;
+    const x = dvNum(sh, dv.formula1), y = dvNum(sh, dv.formula2);
+    switch (dv.operator) {
+      case 'between': return x != null && y != null && v >= Math.min(x, y) && v <= Math.max(x, y);
+      case 'notBetween': return x != null && y != null && !(v >= Math.min(x, y) && v <= Math.max(x, y));
+      case 'equal': return v === x;
+      case 'notEqual': return v !== x;
+      case 'greaterThan': return v > x;
+      case 'lessThan': return v < x;
+      case 'greaterThanOrEqual': return v >= x;
+      case 'lessThanOrEqual': return v <= x;
+    }
+    return true;
+  }
+  const ruleTxt = (sh, dv) => {
+    const x = dvNum(sh, dv.formula1), y = dvNum(sh, dv.formula2), s = v => v == null ? '?' : showV(v);
+    return { between: `tussen ${s(x)} en ${s(y)}`, notBetween: `niet tussen ${s(x)} en ${s(y)}`, equal: `gelijk aan ${s(x)}`, notEqual: `niet gelijk aan ${s(x)}`, greaterThan: `groter dan ${s(x)}`, lessThan: `kleiner dan ${s(x)}`, greaterThanOrEqual: `groter dan of gelijk aan ${s(x)}`, lessThanOrEqual: `kleiner dan of gelijk aan ${s(x)}` }[dv.operator] || '';
+  };
+  const showAns = q => isNum(q.typed) ? showV(q.typed) : String(q.sol);
+  const few = (arr, k) => arr.length > (k || 4) ? arr.slice(0, k || 4).join(', ') + ' …' : list(arr);
+  const swappedQ = qs => qs.find(q => NEG.includes(q.okW) && POS.includes(q.badW));
+  const SWAP_MSG = 'Wissel eerst de woorden voor juist en fout om in je ALS-formule (zie de opdracht over feedback).';
+  const NEG = ['jammer', 'fout', 'onjuist', 'niet juist', 'probeer opnieuw', 'nee', 'helaas', 'mis', 'oei'], POS = ['juist', 'goed', 'super', 'prima', 'ja', 'top', 'bravo', 'correct', 'proficiat'];
+
+  /* De opdrachten. lvl = vanaf welk niveau. */
+  function m12tasks(mode) {
+    const need = fn => ({ wb }) => {
+      const an = analyze(wb);
+      if (!an.qs.length) {
+        if (an.unknown.length) return no(`In ${an.unknown[0].F} gebruik je de functie ${nlFn(an.unknown[0].fn)}. Die kent de app (nog) niet. Gebruik ALS, zoals in stap 9.`);
+        return no('Ik vind nog geen vragen. Een vraag heeft een antwoordcel en een feedbackcel met ALS, bv. =ALS(C4="";"vul in";ALS(C4=B4;"juist";"jammer")).' + unresolvedMsg(an));
+      }
+      return fn(an, an.sheet, an.qs);
+    };
+    const T = [
+      { id: 'b1', lvl: 1, text: 'Zet bovenaan een <b>titel</b> (vet of groter) en een korte <b>uitleg</b> voor de gebruiker: wat moet hij doen?',
+        hints: ['De uitleg mag kort zijn, maar wel een zin (minstens 4 woorden).', 'Bv. in A1 "Rekenen en taal voor L3" (vet, groot) en in A2 "Typ je antwoord in de gele vakjes."'],
+        check: ({ wb }) => {
+          const an = analyze(wb), sh = an.sheet;
+          const first = an.qs.length ? Math.min(...an.qs.map(q => rowOf(q.ans))) : Infinity;
+          const qRows = new Set(an.qs.map(q => rowOf(q.ans)));
+          const texts = sh.filled().filter(a => !sh.formula(a) && typeof sh.value(a) === 'string').sort((x, y) => rowOf(x) - rowOf(y) || colOf(x) - colOf(y));
+          const perRow = {}; sh.filled().forEach(a => { perRow[rowOf(a)] = (perRow[rowOf(a)] || 0) + 1; });
+          const above = texts.filter(a => rowOf(a) < first && perRow[rowOf(a)] < 3);   // een rij met 3 of meer kopjes is geen titel
+          const title = above.find(a => { const st = sh.style(a); return st.bold || st.size >= 12; });
+          if (!title) return no(above.length ? `Is "${cut(sh.text(above[0]))}" je titel? Maak ze dan vet of groter, zodat ze opvalt. Of zet er een titel boven.` : 'Zet bovenaan een titel, bv. "Werkblad voor het derde leerjaar", en maak ze vet of groter.');
+          const uitleg = texts.find(a => a !== title && !qRows.has(rowOf(a)) && sh.text(a).trim().split(/\s+/).length >= 4);
+          return uitleg ? ok() : no('Schrijf ook een korte uitleg voor de gebruiker, een zin van minstens 4 woorden. Bv. "Typ je antwoord in de gele vakjes."');
+        } },
+      { id: 'b2', lvl: 1, text: 'Maak <b>minstens 10 vragen</b>. Elke vraag heeft een <b>antwoordcel</b> en een <b>feedbackcel</b> met ALS.',
+        hints: ['Eén rij per vraag: de vraag, de oplossing, de antwoordcel en de feedback.', 'Maak de ALS-formule één keer en trek ze door naar beneden.'],
+        check: need((an, sh, qs) => {
+          if (qs.length < 10) return no(`Ik vind ${qs.length} vra${qs.length === 1 ? 'ag' : 'gen'} met feedback (antwoordcel${qs.length === 1 ? '' : 'len'} ${few(qs.map(q => q.ans))}). Er moeten er minstens 10 zijn.` + unresolvedMsg(an));
+          const noText = qs.filter(q => !hasQuestion(sh, q, an));
+          if (noText.length) return no(`Bij de antwoordcel ${noText[0].ans} vind ik geen vraag. Zet de vraag links van de antwoordcel.`);
+          return ok(`In orde: ik vind ${qs.length} vragen (antwoordcellen ${qs[0].ans} tot ${qs[qs.length - 1].ans}).`);
+        }) },
+      { id: 'b3', lvl: 1, text: 'Zorg voor <b>verschillende vakken</b>: minstens 2 vragen met een <b>getal</b> als antwoord (rekenen) en minstens 2 met een <b>woord</b> (taal, WO, Frans …).',
+        hints: ['Een rekenvraag heeft een getal als oplossing, bv. 6 x 7 = 42.', 'Een taal- of WO-vraag heeft een woord als oplossing, bv. "Rome".'],
+        check: need((an, sh, qs) => {
+          const num = qs.filter(q => isNum(q.typed)).length, txt = qs.length - num;
+          if (num < 2) return no(`Je werkblad heeft ${num} vra${num === 1 ? 'ag' : 'gen'} met een getal als antwoord. Zet er minstens 2 rekenvragen in.` + unresolvedMsg(an));
+          if (txt < 2) return no(`Je werkblad heeft ${txt} vra${txt === 1 ? 'ag' : 'gen'} met een woord als antwoord. Zet er minstens 2 vragen over taal, WO of Frans in.` + unresolvedMsg(an));
+          return ok(`In orde: ${num} vragen met een getal en ${txt} met een woord.`);
+        }) },
+      { id: 'b4', lvl: 1, text: 'Elke vraag geeft <b>feedback</b> met ALS: een woord als het juist is, een ander woord als het fout is, en iets anders als de cel nog <b>leeg</b> is (bv. "vul in").',
+        hints: ['Eerst kijk je of de cel leeg is, dan of het antwoord klopt.', 'Bv. =ALS(C4="";"vul in";ALS(C4=B4;"juist";"jammer")) en doortrekken.'],
+        check: need((an, sh, qs) => {
+          for (const q of qs) {
+            if (q.textNumber) return no(`In ${q.solRef ? q.solRef.a : q.F} staat ${q.sol} als tekst. Typt de gebruiker ${q.sol}, dan zegt ${q.F} "${showV(q.badRaw)}". Typ de oplossing opnieuw, gewoon als getal.`);
+            if (NEG.includes(q.okW) && POS.includes(q.badW)) return no(`Als het antwoord juist is, toont ${q.F} "${showV(q.okRaw)}", en als het fout is "${showV(q.badRaw)}". Wissel de twee woorden om in je ALS-formule.`);
+            if (numOf(q.okRaw) != null && numOf(q.badRaw) != null) return no(`${q.F} toont ${showV(q.okRaw)} of ${showV(q.badRaw)}. Laat woorden zien, bv. "juist" en "jammer".`);
+            if (isErrV(q.emptyRaw)) return no(`Als ${q.ans} leeg is, toont ${q.F} een fout (${showV(q.emptyRaw)}). Begin met ALS(${q.ans}="";"vul in";…)`);
+            if (q.emptyW === q.badW) return no(`Als ${q.ans} nog leeg is, toont ${q.F} al "${showV(q.badRaw)}". Laat dan iets anders zien, bv. "vul in": =ALS(${q.ans}="";"vul in";…)`);
+          }
+          if (an.unresolved.length) return no(unresolvedMsg(an).trim());
+          return ok();
+        }) },
+      { id: 'b5', lvl: 1, text: 'Maak een <b>score</b>: tel hoeveel antwoorden juist zijn met <b>AANTAL.ALS</b>.',
+        hints: ['AANTAL.ALS telt hoe vaak een woord voorkomt in je feedbackcellen.', 'Bv. =AANTAL.ALS(D4:D13;"juist"). Gebruik hetzelfde woord als in je ALS-formule.'],
+        check: need((an, sh, qs) => {
+          if (swappedQ(qs)) return no(SWAP_MSG);
+          const si = scoreInfo(an), b = si.best;
+          if (!b) {
+            const all = Object.keys(sh.cells).filter(a => sh.formula(a));
+            const ca = all.find(a => FX.info(sh.formula(a), 'en').funcs.includes('COUNTA'));
+            if (ca) return no(`AANTALARG in ${ca} telt alle gevulde cellen, ook "${showV(qs[0].badRaw)}". Gebruik AANTAL.ALS.`);
+            const ci = all.find(a => FX.info(sh.formula(a), 'en').funcs.includes('COUNTIF'));
+            if (ci) return no(`AANTAL.ALS in ${ci} telt niet hoeveel antwoorden juist zijn. Kijk na wat er tussen de aanhalingstekens staat: bij jou is dat "${showV(qs[0].okRaw)}".`);
+            return no(`Ik vind nog geen score. Tel het aantal juiste antwoorden, bv. =AANTAL.ALS(${qs[0].F}:${qs[qs.length - 1].F};"${showV(qs[0].okRaw)}").`);
+          }
+          if (b.cover.length < qs.length) { const miss = qs.filter(q => !b.cover.includes(q)).map(q => q.F); return no(`Je score in ${b.a} telt ${few(miss, 3)} nog niet mee. Neem al je feedbackcellen op in het bereik.`); }
+          if (b.vN !== 0 || (isNum(b.vE) && b.vE !== 0)) return no(`Als alle antwoorden fout zijn, toont je score in ${b.a} ${showV(b.vN)}. Dat moet 0 zijn: tel alleen "${showV(qs[0].okRaw)}".`);
+          return ok(`In orde: je score staat in ${b.a}.` + (b.countif ? '' : ' Je telde zonder AANTAL.ALS. Dat werkt ook!'));
+        }) },
+      { id: 'b6', lvl: 1, text: 'Laat de feedback <b>kleuren</b> met voorwaardelijke opmaak: <b>groen</b> als het juist is, <b>rood</b> als het fout is.',
+        hints: ['Selecteer al je feedbackcellen. Start → Voorwaardelijke opmaak → Markeringsregels voor cellen → Tekst die bevat…', 'Eén regel voor "juist" (groene opvulling) en één regel voor "jammer" (lichtrode opvulling).'],
+        check: need((an, sh, qs) => {
+          if (swappedQ(qs)) return no(SWAP_MSG);
+          const none = qs.filter(q => !sh.cfAt(q.F).length);
+          if (none.length === qs.length) return no('Er staat nog geen voorwaardelijke opmaak op je feedbackcellen. Start → Voorwaardelijke opmaak → Markeringsregels voor cellen → Tekst die bevat…');
+          if (none.length) return no(`De feedbackcel${none.length > 1 ? 'len' : ''} ${few(none.map(q => q.F), 3)} ${none.length > 1 ? 'kleuren' : 'kleurt'} nog niet. Selecteer al je feedbackcellen voor je de regel maakt.`);
+          for (const q of qs) {
+            const cO = colsOfStyle(sh.cfStyle(q.F, q.okRaw)), cB = colsOfStyle(sh.cfStyle(q.F, q.badRaw)), cE = colsOfStyle(sh.cfStyle(q.F, q.emptyRaw));
+            if (!cO.includes('groen')) return no(`Bij "${showV(q.okRaw)}" wordt ${q.F} ${cO.length ? cO[0] : 'niet gekleurd'}. Het moet groen worden.`);
+            if (cB.includes('groen') && q.badW.includes(q.okW)) return no(`"${showV(q.badRaw)}" bevat het woord "${showV(q.okRaw)}". Daardoor kleurt de regel "Tekst die bevat ${showV(q.okRaw)}" ook "${showV(q.badRaw)}" groen. Kies een ander woord, bv. "jammer", of gebruik de regel "Gelijk aan".`);
+            if (!cB.includes('rood')) return no(`Bij "${showV(q.badRaw)}" wordt ${q.F} ${cB.length ? cB[0] : 'niet gekleurd'}. Het moet rood worden.`);
+            if (cO.includes('rood') || cB.includes('groen')) return no(`${q.F} krijgt bij juist en bij fout dezelfde kleur. Kijk je regels na.`);
+            if (!blank(q.emptyRaw) && q.emptyW !== q.badW && q.emptyW !== q.okW && (cE.includes('groen') || cE.includes('rood'))) return no(`Bij "${showV(q.emptyRaw)}" kleurt ${q.F} al ${cE.includes('groen') ? 'groen' : 'rood'}. Dat mag pas als er een antwoord staat. Kijk na welke tekst je regel zoekt.`);
+          }
+          return ok();
+        }) },
+      { id: 'b7', lvl: 1, text: 'Maak een vraag met een <b>afbeelding</b>, bv. "Welk dier zie je?"',
+        hints: ['Tabblad Invoegen → Afbeeldingen.', 'Kies Stockafbeeldingen of een afbeelding van je computer, en zet ze bij de vraag. In Excel 365 kan ook "Plaatsen in cel".'],
+        check: ({ wb }) => {
+          const an = analyze(wb), im = an.sheet.imageInfo();
+          if (im.floating || im.inCell.length) return ok();
+          const elders = wb.sheets.find(s => s !== an.sheet && (s.imageInfo().floating || s.imageInfo().inCell.length));
+          return no(elders ? `Je afbeelding staat op het blad "${elders.name}". Zet ze bij een vraag op je werkblad ("${an.sheet.name}").` : 'Ik vind nog geen afbeelding op je werkblad.');
+        } },
+      { id: 'b8', lvl: 1, text: '<b>Verberg</b> de oplossingen, zodat de gebruiker ze niet ziet.',
+        hints: ['Staan je oplossingen in een kolom? Dan verberg je die kolom.', 'Rechtsklik op de kolomletter → Verbergen.'],
+        check: need((an, sh, qs) => {
+          const hidA = qs.find(q => hiddenAt(sh, q.ans));
+          if (hidA) return no(`De antwoordcel ${hidA.ans} is verborgen. Dan kan de gebruiker niets invullen! Verberg alleen de oplossingen.`);
+          const hidF = qs.find(q => hiddenAt(sh, q.F));
+          if (hidF) return no(`De feedbackcel ${hidF.F} is verborgen. Dan ziet de gebruiker niet of zijn antwoord juist is.`);
+          const withRef = qs.filter(q => q.solRef);
+          const vis = withRef.filter(q => !hiddenAt(q.solRef.sh, q.solRef.a));
+          if (vis.length) {
+            const r = vis[0].solRef;
+            return no(r.sh === sh ? `De oplossing in ${r.a} is nog zichtbaar. Verberg kolom ${numToCol(colOf(r.a))}: rechtsklik op de letter ${numToCol(colOf(r.a))} → Verbergen.` : `Je oplossingen staan op het blad "${r.sh.name}". Verberg dat blad: rechtsklik op het bladtabje → Verbergen.`);
+          }
+          return ok(withRef.length ? '' : 'In orde: je oplossingen zitten in je formules.');
+        }) },
+      ...(mode === 'test' ? [{ id: 'b9', lvl: 1, text: 'Maak de <b>antwoordcellen leeg</b> voor je inlevert, zodat een nieuwe gebruiker kan beginnen.',
+        hints: [], check: need((an, sh, qs) => {
+          const vol = qs.filter(q => !blank(sh.value(q.ans))).map(q => q.ans);
+          return vol.length ? no(`Maak de antwoordcellen leeg (nog ingevuld: ${few(vol)}), bewaar en laad opnieuw op.`) : ok();
+        }) }] : []),
+
+      { id: 'g1', lvl: 2, text: 'Gebruik <b>SPATIES.WISSEN</b>: een spatie te veel achter een woord mag geen fout geven.',
+        hints: ['Zet SPATIES.WISSEN rond het antwoord én rond de oplossing (stap 11).', '=ALS(C4="";"vul in";ALS(SPATIES.WISSEN(C4)=SPATIES.WISSEN(B4);"juist";"jammer"))'],
+        check: need((an, sh, qs) => {
+          const todo = qs.filter(q => !q.hasList && !isNum(q.typed));
+          if (!todo.length) return ok('In orde: je woordvragen hebben allemaal een keuzelijst.');
+          const bad = todo.map(q => ({ q, o: sh.calcWith(q.F, { [q.ans]: String(q.sol) + ' ' }) })).filter(x => said(x.o) !== x.q.okW);
+          if (!bad.length) return ok();
+          const { q, o } = bad[0], uses = FX.info(sh.formula(q.F), 'en').funcs.includes('TRIM');
+          return no(`Typt de gebruiker "${q.sol} " (met een spatie erachter), dan toont ${q.F} "${showV(o)}". ${uses ? 'Kijk na waar je SPATIES.WISSEN zette.' : 'Gebruik SPATIES.WISSEN.'}${bad.length > 1 ? ` Dat geldt ook voor ${bad.length - 1} andere vra${bad.length === 2 ? 'ag' : 'gen'}.` : ''}`);
+        }) },
+      { id: 'g2', lvl: 2, text: 'Maak bij <b>minstens 2 vragen een keuzelijst</b>. Het juiste antwoord staat er natuurlijk tussen!',
+        hints: ['Klik op de antwoordcel. Gegevens → Gegevensvalidatie → Toestaan: Lijst.', 'Typ bij Bron de keuzes met een puntkomma ertussen, bv. Parijs;Rome;Brussel.'],
+        check: need((an, sh, qs) => {
+          const lq = qs.filter(q => q.hasList);
+          if (lq.length < 2) {
+            const elders = sh.dataValidations.filter(d => d.type === 'list' && !qs.some(q => lists(sh, q.ans).includes(d))).map(d => d.sqref);
+            if (elders.length) return no(`Je keuzelijst staat op ${elders[0]}, maar dat is geen antwoordcel. Zet de keuzelijst op de cel waar de gebruiker zijn antwoord kiest.`);
+            return no(lq.length ? `Je hebt 1 keuzelijst (bij ${lq[0].ans}). Maak er minstens 2.` : 'Maak bij minstens 2 vragen een keuzelijst: Gegevens → Gegevensvalidatie → Lijst.');
+          }
+          for (const q of lq) {
+            const items = sh.dvListItems(lists(sh, q.ans)[0]);
+            if (!items) return no(`De keuzes van de keuzelijst in ${q.ans} kan ik niet lezen. Typ ze met een puntkomma ertussen, of kies een bereik op hetzelfde blad.`);
+            if (items.length < 2) return no(`De keuzelijst in ${q.ans} heeft maar één keuze${items[0] ? ` ("${items[0]}")` : ''}. Zet een puntkomma tussen de keuzes.`);
+            const want = norm(showAns(q));
+            if (!items.some(x => norm(x) === want || (isNum(q.typed) && typedAs(x) === q.typed))) return no(`In de keuzelijst van ${q.ans} staat het juiste antwoord (${showAns(q)}) niet. Zo kan de gebruiker nooit juist antwoorden!`);
+          }
+          return ok(`In orde: ${lq.length} keuzelijsten.`);
+        }) },
+      { id: 'g3', lvl: 2, text: 'Toon de <b>score als procent</b>: het aantal juist gedeeld door het aantal vragen.',
+        hints: ['Delen doe je met /. Daarna de knop %.', 'Bv. =B16/10 als je score in B16 staat en je 10 vragen hebt.'],
+        check: need((an, sh, qs) => {
+          const si = scoreInfo(an), n = qs.length, p = si.pct;
+          if (!p) {
+            const near = si.list.find(x => !Number.isInteger(x.vA) && x.vA > 0 && x.vA < 3);
+            if (near && an.unresolved.length) return no('Eerst moeten al je vragen werken.' + unresolvedMsg(an));
+            if (near) return no(`Als alles juist is, toont ${near.a} ${pctTxt(near.vA)} in plaats van 100%. Deel je door het juiste aantal vragen (${n})?`);
+            return no(`Toon de score ook als procent: het aantal juist gedeeld door het aantal vragen (${n})${si.best ? `, bv. =${si.best.a}/${n}` : ''}.`);
+          }
+          if (!isNum(p.vH) || Math.abs(p.vH - si.half / n) > 1e-9) return no(`Met ${si.half} van de ${n} juist toont ${p.a} ${isNum(p.vH) ? pctTxt(p.vH) : showV(p.vH)}. Dat moet ${pctTxt(si.half / n)} zijn.`);
+          return sh.numFmt(p.a).kind === 'percent' ? ok() : no(`${p.a} rekent goed, maar toont nog geen procent. Klik op %.`);
+        }) },
+      { id: 'g4', lvl: 2, text: 'Zet de <b>rasterlijnen</b> uit.',
+        hints: ['Dat vind je op het tabblad Beeld.', 'Tabblad Beeld → haal het vinkje bij Rasterlijnen weg.'],
+        check: ({ wb }) => analyze(wb).sheet.showGrid ? no('De rasterlijnen zijn nog zichtbaar.') : ok() },
+      { id: 'g5', lvl: 2, text: '<b>Beveilig</b> het blad. Eerst ontgrendel je de antwoordcellen, de rest blijft geblokkeerd.',
+        hints: ['Selecteer de antwoordcellen → Ctrl + 1 → Bescherming → vinkje Geblokkeerd weg.', 'Daarna: Controleren → Blad beveiligen → OK.'],
+        check: need((an, sh, qs) => {
+          if (!sh.isProtected) return no('Het blad is nog niet beveiligd. Controleren → Blad beveiligen.');
+          const lockedA = qs.filter(q => sh.style(q.ans).locked).map(q => q.ans);
+          if (lockedA.length === qs.length) return no('Het blad is beveiligd, maar de antwoordcellen zijn nog geblokkeerd. De gebruiker kan niets invullen! Hef de beveiliging op, ontgrendel de antwoordcellen en beveilig opnieuw.');
+          if (lockedA.length) return no(`De antwoordcel${lockedA.length > 1 ? 'len' : ''} ${few(lockedA, 3)} ${lockedA.length > 1 ? 'zijn' : 'is'} nog geblokkeerd. Daar kan de gebruiker niets typen.`);
+          const si = scoreInfo(an);
+          const must = [...qs.map(q => q.F), ...qs.filter(q => q.solRef && q.solRef.sh === sh).map(q => q.solRef.a), ...(si.best ? [si.best.a] : [])];
+          const open = [...new Set(must.filter(a => !sh.style(a).locked))];
+          if (open.length) return no(`Ook ${few(open, 3)} ${open.length > 1 ? 'zijn' : 'is'} ontgrendeld. Dan kan de gebruiker daar iets veranderen of wissen. Ontgrendel alleen de antwoordcellen.`);
+          const inF = qs.find(q => !q.solRef && !sh.style(q.F).hiddenFormula);
+          if (inF) return no(`De oplossing van ${inF.ans} staat in de formule van ${inF.F}. Die kan de gebruiker lezen in de formulebalk. Hef de beveiliging op, selecteer je feedbackcellen → Ctrl + 1 → Bescherming → vink ook "Verborgen" aan, en beveilig opnieuw.`);
+          return ok();
+        }) },
+
+      { id: 'e1', lvl: 3, text: 'Maak een <b>eindboodschap</b> die afhangt van de score, bv. "Super gedaan!" of "Oefen nog wat".',
+        hints: ['Gebruik ALS met je score: is de score hoog genoeg?', 'Bv. =ALS(B16>=8;"Super gedaan!";"Oefen nog wat")'],
+        check: need((an, sh, qs) => {
+          const si = scoreInfo(an), m = si.msgs.find(x => x.differs);
+          if (m) return ok(`In orde: bij alles juist zegt ${m.a} "${showV(m.oA)}", bij niets juist "${showV(m.oN)}".`);
+          if (si.msgs.length) return no(`Je boodschap in ${si.msgs[0].a} zegt altijd "${showV(si.msgs[0].oA)}", ook als alles fout is. Kijk na met welke cel en welk getal je ALS-formule vergelijkt.`);
+          return no(`Maak een eindboodschap met ALS die naar je score kijkt${si.best ? `, bv. =ALS(${si.best.a}>=${si.best.vA === 1 ? '80%' : Math.ceil(si.best.vA * 0.8)};"Super gedaan!";"Oefen nog wat")` : ''}.`);
+        }) },
+      { id: 'e2', lvl: 3, text: 'Laat de <b>score kleuren</b>: bv. groen als de score hoog is, rood als ze laag is.',
+        hints: ['Voorwaardelijke opmaak op de cel met je score of je procent.', 'Markeringsregels voor cellen → Groter dan / Kleiner dan.'],
+        check: need((an, sh, qs) => {
+          const si = scoreInfo(an);
+          const targets = [...new Set([si.best, si.pct].filter(Boolean))];
+          const withCf = targets.filter(t => sh.cfAt(t.a).length);
+          for (const t of withCf) {
+            const cA = colsOfStyle(sh.cfStyle(t.a, t.vA)), cN = colsOfStyle(sh.cfStyle(t.a, t.vN));
+            if ((cA.length || cN.length) && cA.join() !== cN.join()) return ok();
+          }
+          const mc = si.msgs.find(m => m.differs && sh.cfAt(m.a).length && colsOfStyle(sh.cfStyle(m.a, m.oA)).join() !== colsOfStyle(sh.cfStyle(m.a, m.oN)).join());
+          if (mc) return ok();
+          if (withCf.length) return no(`Je score in ${withCf[0].a} krijgt bij alles juist en bij niets juist dezelfde kleur. Kijk de getallen in je regel na.`);
+          return no(`Zet voorwaardelijke opmaak op je score${targets.length ? ` (${list(targets.map(t => t.a))})` : ''}: bv. groen bij een hoge score.`);
+        }) },
+      { id: 'e3', lvl: 3, text: 'Laat bij een <b>rekenvraag alleen getallen</b> toe, met een <b>eigen foutmelding</b>.',
+        hints: ['Gegevens → Gegevensvalidatie → Toestaan: Geheel getal (of Decimaal), met een minimum en een maximum.', 'Typ op het tabblad Foutmelding een eigen bericht, bv. "Typ een getal tussen 0 en 100."'],
+        check: need((an, sh, qs) => {
+          const nq = qs.filter(q => isNum(q.typed)).map(q => ({ q, dv: sh.dvAt(q.ans).find(d => d.type === 'whole' || d.type === 'decimal') })).filter(x => x.dv);
+          if (!nq.length) return no('Geef een rekenvraag een gegevensvalidatie: Toestaan: Geheel getal, met een eigen foutmelding.');
+          for (const { q, dv } of nq) if (!dvAllows(sh, dv, q.typed)) return no(`Het juiste antwoord van ${q.ans} (${showV(q.typed)}) past niet in je regel (${dv.type === 'whole' && !Number.isInteger(q.typed) ? 'geheel getal' : ruleTxt(sh, dv)}). Dan kan de gebruiker het juiste antwoord niet eens typen!`);
+          const good = nq.find(x => x.dv.showErrorMessage && (x.dv.error || '').trim());
+          return good ? ok() : no(`Typ bij de gegevensvalidatie van ${nq[0].q.ans} op het tabblad Foutmelding een eigen bericht.`);
+        }) },
+      { id: 'e4', lvl: 3, text: 'Laat minstens één keuzelijst de keuzes uit een <b>bereik</b> halen (bv. uit een verborgen kolom).',
+        hints: ['Typ de keuzes in cellen naast elkaar, bv. K9:N9.', 'Gegevensvalidatie → Lijst → klik in het vak Bron en selecteer die cellen. Verberg daarna die kolommen.'],
+        check: need((an, sh, qs) => {
+          const lq = qs.filter(q => q.hasList).map(q => ({ q, dv: lists(sh, q.ans)[0] }));
+          const r = lq.find(x => sh.dvIsRange(x.dv));
+          if (!r) return no(lq.length ? 'Je keuzelijsten hebben losse woorden als bron. Laat minstens één keuzelijst de keuzes uit cellen halen: klik in het vak Bron en selecteer de cellen.' : 'Maak een keuzelijst met als bron een bereik: typ de keuzes in cellen en selecteer die cellen in het vak Bron.');
+          const items = sh.dvListItems(r.dv);
+          if (!items || items.length < 2) return no(`De bron van de keuzelijst in ${r.q.ans} (${r.dv.formula1}) bevat geen keuzes. Staan de keuzes in die cellen?`);
+          return ok();
+        }) }
+    ];
+    return T;
+  }
+  function starsOf(tasks, results) {
+    const okIds = new Set((results || []).filter(r => r.ok).map(r => r.id));
+    let s = 0;
+    for (const L of [1, 2, 3]) {
+      const t = tasks.filter(x => x.lvl <= L);
+      if (!tasks.some(x => x.lvl === L)) break;
+      if (t.every(x => okIds.has(x.id))) s = L; else break;
+    }
+    return s;
+  }
+
+  const m12 = {
+    id: 'm12', nr: 12, project: true,
+    title: 'Project: mijn interactief werkblad',
+    short: 'Je maakt een echt werkblad voor je klas of voor een andere klas. Je kiest zelf je niveau: ★, ★★ of ★★★. Een klasgenoot test het, en daarna lever je het in.',
+    skills: ['plannen', 'voor iemand anders', '10 vragen', 'ALS en AANTAL.ALS', 'kleuren', 'afbeelding', 'beveiligen', 'testen'],
+    tabLabels: { practice: 'Tussentijds nakijken', test: 'Inleveren' },
+    tabShort: { practice: 'Nakijken' },
+    noun: 'werkblad', fileWord: 'werkblad',
+    levels: NIVEAUS, levelOf, withLevel, starsOf,
+    passCheck: (tasks, results) => starsOf(tasks, results) >= 1,   // in orde = alles van ★ klopt; elke ster meer is een extra
+    route: {
+      practice: ['Werk in Excel aan je werkblad. Begin met een <b>lege werkmap</b>, of open je bestand van stap 11 en kies <b>Bestand → Opslaan als</b> met een nieuwe naam.',
+        'Bewaar het in <b>OneDrive</b> met de naam <span class="addr">{fname}</span>.',
+        'Laad het tussendoor op: de app kijkt na wat al in orde is. Dat mag zo vaak als je wil!'],
+      test: ['Maak de <b>antwoordcellen leeg</b>, zodat een nieuwe gebruiker kan beginnen.', 'Bewaar je werkblad (<b>Ctrl + S</b>).', 'Laad het hieronder op. De app kijkt alles na en stuurt het naar je leerkracht.']
+    },
+    testIntro: 'Geen tips meer. De app speelt gebruiker en kijkt alles na. Je werkblad is goedgekeurd als alle opdrachten van ★ in orde zijn. Elke ster meer is een extra.',
+    gate: {
+      intro: '<p>Je werkblad is bijna klaar. Eerst nog dit:</p>',
+      checks: ['Een klasgenoot heeft mijn werkblad getest met de testkaart.', 'Ik heb de tip van mijn tester bekeken en mijn werkblad verbeterd.', 'De antwoordcellen zijn weer leeg en mijn werkblad is bewaard.'],
+      fields: [{ id: 'tester', label: 'Wie testte je werkblad?' }, { id: 'tip', label: 'Welke tip kreeg je?', area: true }]
+    },
+    lessons: [
+      { id: 'l1', title: 'Voor wie maak je het?',
+        body: `<p>Dit is het grote project: je maakt een <b>echt werkblad</b> dat iemand anders gaat gebruiken. Voor je eigen klas, of voor een andere klas, bv. het derde leerjaar.</p>
+<p>Denk eerst aan je <b>gebruiker</b>. Wat kan hij al? Welke woorden kent hij? Hoe weet hij wat hij moet doen?</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Je maakt een werkblad voor het derde leerjaar. Wat is het beste?', options: ['Korte vragen, eenvoudige woorden en een duidelijke uitleg', 'Zo moeilijk mogelijk, dan leren ze meer', 'Geen uitleg: ze zien wel hoe het werkt'], correct: 0, explain: 'Een goed werkblad past bij de gebruiker. Wat voor jou makkelijk is, kan voor een jongere leerling moeilijk zijn.' },
+          { q: 'Waarom zet je een afbeelding bij een vraag?', options: ['Ze helpt de gebruiker de vraag te begrijpen, en het is leuker', 'Om de vragen te bedekken', 'Excel werkt niet zonder afbeelding'], correct: 0, explain: 'Een afbeelding kan zelf de vraag zijn: "Welk dier zie je?"' },
+          { q: 'Hoe weet je gebruiker waar hij zijn antwoord typt?', options: ['De antwoordcellen hebben een kleur en de uitleg zegt het', 'Hij klikt overal tot het lukt', 'Dat raadt hij wel'], correct: 0, explain: 'Een opvulkleur (stap 3) en één zin uitleg helpen veel. Bv. "Typ je antwoord in de gele vakjes."' }
+        ] } },
+      { id: 'l2', title: 'Kies je niveau',
+        body: `<p>Iedereen maakt <b>minstens 10 vragen</b>, met <b>rekenen én taal of WO</b>. Daarna kies je hoe ver je gaat:</p>
+<p><b>★ Basis</b> – een werkblad dat werkt: feedback, een score, kleuren, een afbeelding en verborgen oplossingen.<br>
+<b>★★ Gevorderd</b> – alles van ★, plus SPATIES.WISSEN, keuzelijsten, de score in procent, geen rasterlijnen en een beveiligd blad.<br>
+<b>★★★ Expert</b> – alles van ★★, plus een eindboodschap, een score die kleurt, een rekenvraag met een eigen foutmelding en een keuzelijst uit een bereik.</p>
+<p>Kies wat bij je past. Je mag later altijd <b>een niveau hoger</b> proberen (of lager).</p>`,
+        widget: { type: 'levelPick' } },
+      { id: 'l3', title: 'Een plan op papier',
+        body: `<p><b>Eerst goed denken, dan pas bouwen.</b> Maak je plan op papier, voor je Excel opent.</p>
+<p>Kijk je oplossingen goed na! Een fout in je oplossing betekent dat je gebruiker "jammer" krijgt terwijl hij juist antwoordt.</p>
+<div class="grid-wrap"><table class="mini sample"><tbody>
+<tr><td><b>Vraag</b></td><td><b>Oplossing</b></td><td><b>Antwoord</b></td><td><b>Feedback</b></td></tr>
+<tr><td>6 x 7 =</td><td class="n">42</td><td></td><td>vul in</td></tr>
+<tr><td>Hoofdstad van Italië?</td><td>Rome</td><td></td><td>vul in</td></tr>
+<tr><td>Welk dier zie je? 🐘</td><td>olifant</td><td></td><td>vul in</td></tr>
+</tbody></table></div>`,
+        widget: { type: 'steps', steps: [
+          'Ik weet <b>voor wie</b> ik het werkblad maak.',
+          'Ik schrijf minstens <b>10 vragen</b> met hun <b>oplossing</b> op papier.',
+          'Er zijn <b>rekenvragen</b> (het antwoord is een getal) én vragen over <b>taal, WO of Frans</b> (het antwoord is een woord).',
+          'Ik weet welke vraag een <b>afbeelding</b> krijgt.',
+          'Ik teken mijn <b>kolommen</b>: vraag, oplossing, antwoord en feedback.',
+          'Bij ★★ en ★★★: ik weet welke vragen een <b>keuzelijst</b> krijgen.'
+        ], confirm: 'Mijn plan is klaar' } },
+      { id: 'l4', title: 'Zo kijkt de app na',
+        body: `<p>Jij kiest hoe je werkblad eruitziet. De app zoekt zelf je vragen: elke <b>ALS-formule</b> die naar een antwoordcel kijkt, is een vraag.</p>
+<p>Daarna <b>speelt de app gebruiker</b>. In gedachten vult ze je werkblad in: alles juist, alles fout, alles leeg, een spatie te veel … en ze kijkt wat je werkblad dan zegt. Klopt je score? Verandert de kleur?</p>
+<p>Tip: laad je werkblad <b>tussendoor</b> op bij Tussentijds nakijken. Zo zie je meteen wat al in orde is.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Je antwoordcellen staan in kolom E in plaats van C. Vindt de app je vragen?', options: ['Ja: de app zoekt de cellen waar je ALS-formule naar kijkt', 'Nee, het moet altijd kolom C zijn'], correct: 0, explain: 'Je bent vrij in je opbouw. Zet wel de vraag links van de antwoordcel, dan leest het makkelijk.' },
+          { q: 'Je feedback zegt "goed" en "probeer opnieuw". Mag dat?', options: ['Ja, als je score dan ook "goed" telt en je kleuren "goed" zoeken', 'Nee, alleen juist en jammer'], correct: 0, explain: 'Je mag je eigen woorden kiezen. Gebruik ze dan overal hetzelfde: in ALS, in AANTAL.ALS en in je kleurregels.' },
+          { q: 'De app typt in gedachten het juiste antwoord, maar je werkblad zegt "jammer". Wat is er mis?', options: ['Waarschijnlijk klopt mijn oplossing of mijn formule niet', 'De app is stuk'], correct: 0, explain: 'Vaak is het een tikfout in de oplossing, een spatie te veel, of een getal dat als tekst getypt is. Probeer het zelf in Excel!' }
+        ] } },
+      { id: 'l5', title: 'Testen door een klasgenoot',
+        body: `<p>Een echte maker laat zijn werk <b>testen</b>. Vraag een klasgenoot om aan jouw laptop je werkblad te proberen, met deze <b>testkaart</b>. Jij kijkt mee en zegt niets!</p>
+<p>Daarna verbeter je wat niet goed werkte, en maak je de antwoordcellen weer leeg. Bij <b>Inleveren</b> vul je in wie testte en welke tip je kreeg.</p>`,
+        widget: { type: 'steps', steps: [
+          'Lees de uitleg. Weet je meteen wat je moet doen?',
+          'Vul alles <b>juist</b> in. Staat de score op het maximum?',
+          'Typ bij een vraag iets <b>fouts</b>. Wordt het rood?',
+          'Laat een vraag <b>leeg</b>. Zegt het werkblad "vul in"?',
+          'Typ een woord met een <b>spatie</b> erachter. Blijft het juist? (★★)',
+          'Probeer een <b>oplossing</b> te zien of een <b>formule</b> te wissen. Lukt het niet? Prima! (★★)',
+          'Zeg de maker <b>één top</b> (wat goed is) en <b>één tip</b> (wat beter kan).'
+        ], confirm: 'Ik ken de testkaart' } }
+    ],
+    newFile: true,
+    gen(seed, mode) {
+      const L = levelOf(seed);
+      return { startFile: null, level: L, tasks: m12tasks(mode).filter(t => t.lvl <= L) };
+    }
+  };
+
+  const MODULES = [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12];
 
   /* Volgende modules (nog te bouwen) – getoond als vooruitblik. */
-  const SOON = [
-    { nr: 12, title: 'Project: mijn interactief werkblad', short: 'Je maakt een werkblad voor je klas of voor een andere klas.', project: true }
-  ];
+  const SOON = [];
 
   /* Alle opdrachten van een poging nakijken. */
   function runChecks(mod, gen, wb, ctx) {
