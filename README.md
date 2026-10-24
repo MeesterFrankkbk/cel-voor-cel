@@ -26,6 +26,7 @@ Open je `index.html` zonder Netlify (bv. lokaal), dan start de app in **demomodu
 5. Getallen tonen (procent, euro, decimalen, datum, komma)
 6. Je eerste formules (=, + − * /, celadressen, doortrekken, haakjes, foutmeldingen)
 7. Functies (SOM, GEMIDDELDE, MIN, MAX, MEDIAAN, AANTAL, AFRONDEN)
+8. Project: mijn maandrapport (oefenrapport met gegeven punten, daarna eigen rapport met echte punten)
 
 Het ontwerp van elke stap staat in de map `docs/`.
 

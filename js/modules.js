@@ -1173,13 +1173,248 @@
     return v != null && Math.abs(v - expect) < 1e-9 ? ok(`Juist: ${s.show(a)}.`) : no(`Je formule geeft ${s.show(a)}. Controleer het bereik.`);
   }
 
-  const MODULES = [m1, m2, m3, m4, m5, m6, m7];
+  // ======================================================================
+  // MODULE 8 – Project: mijn maandrapport
+  // ======================================================================
+  const SCHOOLMAANDEN = ['september', 'oktober', 'november', 'december', 'januari', 'februari', 'maart', 'april', 'mei', 'juni'];
+  const ALIAS = {
+    vak: ['vak', 'vakken', 'onderdeel', 'toets', 'toetsen', 'leergebied'],
+    score: ['score', 'scores', 'punten', 'behaald', 'resultaat', 'mijnpunten', 'mijnscore', 'punt'],
+    max: ['maximum', 'max', 'op', 'maximaal', 'maxpunten', 'maximumscore', 'opdeel', 'totaalpunten'],
+    pct: ['procent', '%', 'percent', 'percentage', 'procenten', 'procent%']
+  };
+  const key = t => norm(t).replace(/[^a-z%]/g, '');
+  /* Zoekt de rapporttabel, waar die ook staat. */
+  function findReport(sheet) {
+    if (sheet._rep !== undefined) return sheet._rep;
+    let rep = null;
+    const cand = sheet.filled().filter(a => ALIAS.vak.includes(key(sheet.text(a)))).map(parseAddr).sort((p, q) => p.r - q.r || p.c - q.c);
+    for (const p of cand) {
+      const cols = { vak: p.c };
+      for (let c = p.c + 1; c <= p.c + 8; c++) {
+        const k = key(sheet.text(addr(c, p.r)));
+        for (const nm of ['score', 'max', 'pct']) if (!cols[nm] && ALIAS[nm].includes(k)) cols[nm] = c;
+      }
+      if (cols.score && cols.max && cols.pct) {
+        const rows = [];
+        let r = p.r + 1, tot = null, avg = null;
+        const label = rr => { for (let c = Math.max(1, p.c - 1); c <= p.c; c++) { const t = key(sheet.text(addr(c, rr))); if (t) return t; } return ''; };
+        for (; r <= p.r + 60; r++) {
+          const t = label(r);
+          if (!t) { if (label(r + 1) || label(r + 2)) continue; break; }
+          if (t.startsWith('totaal')) { tot = tot || r; continue; }
+          if (t.startsWith('gemiddel')) { avg = avg || r; continue; }
+          if (tot || avg) break;
+          rows.push(r);
+        }
+        rep = { hdr: p.r, cols, rows, tot, avg, A: (k, rr) => addr(cols[k], rr) };
+        break;
+      }
+    }
+    sheet._rep = rep;
+    return rep;
+  }
+  const noTable = () => no('Ik vind je tabel nog niet. Zet de kopjes Vak, Score, Maximum en Procent naast elkaar op één rij.');
+  function pctFmt(sheet, a) { const k = sheet.numFmt(a).kind; return k === 'percent' ? null : `${a} rekent goed, maar toont nog geen procent. Klik op %.`; }
+  function rowRatio(sheet, a, sA, mA, label) {
+    const f = sheet.formula(a);
+    const s = numOf(sheet.calc(sA)), m = numOf(sheet.calc(mA));
+    if (!f) {
+      const v = sheet.value(a);
+      if (v == null || String(v).trim() === '') return no(`${a} (procent ${label}) is nog leeg.`);
+      return no(`In ${a} staat een getal, geen formule. Laat Excel het procent berekenen: =${sA}/${mA}`);
+    }
+    const inf = FX.info(f, 'en'), v = sheet.calc(a);
+    if (FX.isErr(v)) return checkFormula(sheet, a, {});
+    if (!inf.cells.includes(sA) || !inf.cells.includes(mA)) {
+      const used = [...new Set(inf.cells)];
+      return no(`De formule in ${a} moet rekenen met ${sA} en ${mA} (${label}), maar ze gebruikt ${list(used) || 'geen cellen'}.`);
+    }
+    if (!(isNum(v) && s != null && m ? Math.abs(v - s / m) < 0.005 : false)) {
+      if (isNum(v) && s != null && m && Math.abs(v - m / s) < 1e-6) return no(`In ${a} deelde je omgekeerd. Het is score gedeeld door maximum: =${sA}/${mA}`);
+      return no(`De formule in ${a} geeft ${showV(v)}. Score gedeeld door maximum is ${showV(s / m)}.`);
+    }
+    return null;
+  }
+  function m8data(seed) {
+    const r = rng(seed + '|m8');
+    const pool = [['Wiskunde 1'], ['Wiskunde 2'], ['Wiskunde 3'], ['Taal 1'], ['Taal 2'], ['Spelling 1'], ['Frans 1'], ['Frans 2'], ['WO 1']];
+    const n = r.int(6, 8);
+    const keep = r.shuffle(pool.map((_, i) => i)).slice(0, n).sort((a, b) => a - b);
+    const vakken = keep.map(i => { const max = r.pick([10, 15, 20, 25, 30, 40, 50]); return { n: pool[i][0], max, s: r.int(Math.ceil(max * 0.45), max) }; });
+    return { maand: r.pick(SCHOOLMAANDEN), vakken };
+  }
+
+  const m8 = {
+    id: 'm8', nr: 8, project: true,
+    title: 'Project: mijn maandrapport',
+    short: 'Je bouwt je eigen rapport voor dagelijks werk, van een lege werkmap tot een verzorgde tabel die zelf rekent. Eerst een oefenrapport, dan je eigen rapport met je echte punten.',
+    skills: ['plannen', 'procent per vak', 'SOM en GEMIDDELDE', 'procentnotatie', 'opmaak', 'eigen punten'],
+    tabLabels: { practice: 'Oefenrapport', test: 'Mijn eigen rapport' },
+    testGate: `<ul class="list-plain">
+<li>Nu maak je <b>je eigen rapport</b> met je <b>echte punten</b> van deze maand (minstens 5 vakken).</li>
+<li>Je mag je oefenrapport gebruiken als vertrekpunt: <b>Bestand → Opslaan als</b> met een nieuwe naam, en vervang de vakken en punten.</li>
+<li>Er zijn geen hulplijnen. De app kijkt de opbouw na; je leerkracht kijkt mee naar je punten.</li>
+<li>Je hebt 80% nodig.</li></ul>`,
+    lessons: [
+      { id: 'l1', title: 'Een plan maken',
+        body: `<p>Een goed rapport begin je met een <b>plan</b>. Kijk naar het voorbeeld: wat staat er allemaal in?</p>
+<div class="grid-wrap"><table class="mini sample"><tbody>
+<tr><td colspan="4"><b>Rapport dagelijks werk – oktober</b></td></tr>
+<tr><td colspan="4">Lotte Peeters</td></tr>
+<tr><td><b>Vak</b></td><td><b>Score</b></td><td><b>Maximum</b></td><td><b>Procent</b></td></tr>
+<tr><td>Wiskunde 1</td><td class="n">27</td><td class="n">40</td><td class="n">68%</td></tr>
+<tr><td>Taal 1</td><td class="n">15</td><td class="n">25</td><td class="n">60%</td></tr>
+<tr><td>Frans 1</td><td class="n">25</td><td class="n">30</td><td class="n">83%</td></tr>
+<tr><td><b>Totaal</b></td><td class="n">67</td><td class="n">95</td><td class="n">71%</td></tr>
+<tr><td><b>Gemiddeld</b></td><td class="n">22,3</td><td class="n">31,7</td><td class="n">71%</td></tr>
+</tbody></table></div>
+<p>Alles wat grijs zou zijn op papier, laat je Excel berekenen: het procent, het totaal en het gemiddelde.</p>`,
+        widget: { type: 'steps', steps: ['Een <b>titel</b> met het woord rapport en de maand', 'Je <b>naam</b>', 'De <b>kopjes</b> Vak, Score, Maximum en Procent naast elkaar', 'Eén rij per <b>vak</b> met je score en het maximum', 'Het <b>procent</b> per vak: een formule', 'Een rij <b>Totaal</b> met SOM', 'Een rij <b>Gemiddeld</b> met GEMIDDELDE', 'Mooie <b>opmaak</b>: vet, randen, procent'], confirm: 'Mijn plan is klaar' } },
+      { id: 'l2', title: 'Procent per vak',
+        body: `<p>27 op 40: hoeveel procent is dat? Je deelt de score door het maximum: 27 / 40 = 0,675. Met de knop % (stap 5) zie je 68%.</p>
+<p>In Excel schrijf je dat met celadressen, zodat het rapport vanzelf klopt als je een punt verandert.</p>`,
+        widget: { type: 'sheetSim', rows: 3, cols: 4, widths: [100, 60, 80, 80], cells: { A1: 'Vak', B1: 'Score', C1: 'Maximum', D1: 'Procent', A2: 'Wiskunde 1', B2: 27, C2: 40, A3: 'Taal 1', B3: 15, C3: 25 }, rounds: [
+          { select: 'D2', ask: 'Bereken in <span class="addr">D2</span> het procent voor wiskunde: score gedeeld door maximum.',
+            check: (s, ch) => ch !== 'D2' ? null : !s.info('D2') ? no('Een formule begint met =.') : !(s.info('D2').cells.includes('B2') && s.info('D2').cells.includes('C2')) ? no('Gebruik B2 en C2 in je formule.') : s.num('D2') === 0.675 ? ok('Juist: 0,675. In Excel klik je daarna op % en zie je 68%.') : s.num('D2') === 40 / 27 ? no('Omgekeerd: eerst de score, dan delen door het maximum.') : no(`Je formule geeft ${s.show('D2')}.`) },
+          { select: 'D3', ask: 'Doe hetzelfde voor taal in <span class="addr">D3</span>.',
+            check: (s, ch) => ch !== 'D3' ? null : s.info('D3') && s.info('D3').cells.includes('B3') && s.info('D3').cells.includes('C3') && s.num('D3') === 0.6 ? ok('Juist: 0,6 is 60%.') : no('Typ =B3/C3.') }
+        ] } },
+      { id: 'l3', title: 'Denkvraag: twee soorten gemiddelde',
+        body: `<p>Lotte heeft drie toetsen: <b>4 op 5</b> (80%), <b>30 op 50</b> (60%) en <b>9 op 10</b> (90%).</p>
+<p>Manier 1: alles samen. 4 + 30 + 9 = 43 op 5 + 50 + 10 = 65. Dat is <b>66%</b>.<br>Manier 2: het gemiddelde van de procenten. (80 + 60 + 90) / 3 = <b>77%</b>.</p>
+<p>Twee keer een "gemiddelde", maar een andere uitkomst! Denk even na voor je de vragen beantwoordt.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Waarom geven de twee manieren een andere uitkomst?', options: ['Excel maakt een rekenfout', 'Bij manier 1 telt de toets op 50 veel zwaarder mee dan de toets op 5', 'Bij manier 2 tel je de toetsen dubbel'], correct: 1, explain: 'Bij manier 1 telt elk punt even zwaar. Een grote toets heeft dus meer invloed. Bij manier 2 telt elke toets even zwaar, groot of klein.' },
+          { q: 'Je rapport gebruikt manier 1: totaal van de scores gedeeld door totaal van de maxima. Welke formule hoort bij de rij Totaal?', options: ['=B8/C8 (totaal score / totaal maximum)', '=GEMIDDELDE(D2:D7)', '=B8*C8'], correct: 0, explain: 'Zo telt elk punt dat je haalde even zwaar.' },
+          { q: 'En in de rij Gemiddeld: gemiddelde score / gemiddeld maximum. Wat komt daar uit?', options: ['Hetzelfde procent als bij Totaal', 'Altijd 50%', 'Het gemiddelde van de procenten'], correct: 0, explain: 'Teller en noemer worden allebei door hetzelfde aantal vakken gedeeld, dus het procent blijft gelijk. Knap als je dat zelf zag!' }
+        ] } },
+      { id: 'l4', title: 'Een rapport dat je graag leest',
+        body: `<p>Een goed rapport lees je in één oogopslag. Dit helpt:</p>
+<p>• een <b>titel</b> die groter of vet is (stap 3)<br>• <b>vette kopjes</b> en eventueel een opvulkleur<br>• <b>alle randen</b> rond de tabel<br>• kolommen die <b>passen</b>: dubbelklik tussen de kolomletters (stap 2)<br>• procenten <b>zonder of met 1 decimaal</b>, niet met tien (stap 5)<br>• de rijen <b>Totaal</b> en <b>Gemiddeld</b> vet, zodat ze opvallen</p>`,
+        widget: { type: 'read', confirm: 'Ik let erop' } },
+      { id: 'l5', title: 'Je eigen rapport',
+        body: `<p>Na het oefenrapport maak je <b>je eigen rapport</b> met je echte punten van deze maand. Je vindt ze in je agenda, op je toetsen of in je map.</p>
+<p>Je mag zoveel vakken toevoegen als je wil, maar zorg dat <b>SOM en GEMIDDELDE alle vakken</b> meetellen. Voeg je een vak toe in het midden van de tabel (rij invoegen, stap 2), dan past Excel de formules vanzelf aan.</p>
+<p>De app kent jouw punten niet. Ze kijkt na of je rapport goed <b>rekent</b> en goed <b>opgebouwd</b> is. Je leerkracht ziet je bestand.</p>`,
+        widget: { type: 'read', confirm: 'Begrepen' } }
+    ],
+    newFile: true,
+    gen(seed, mode, student) {
+      const own = mode === 'test';
+      const d = m8data(seed);
+      const vn = (student && student.voornaam) || '';
+      const tabel = `<div class="grid-wrap"><table class="mini sample"><tbody><tr><td><b>Vak</b></td><td><b>Score</b></td><td><b>Maximum</b></td></tr>${d.vakken.map(v => `<tr><td>${v.n}</td><td class="n">${v.s}</td><td class="n">${v.max}</td></tr>`).join('')}</tbody></table></div>`;
+      const needRep = fn => ({ sheet }) => { const rep = findReport(sheet); return rep ? fn(sheet, rep) : noTable(); };
+      const allRowsMsg = (what, miss) => `${what} telt ${list(miss)} nog niet mee. Neem alle vakken op in het bereik.`;
+      return { startFile: null, tasks: [
+        { id: 't1', text: own ? 'Typ bovenaan een <b>titel</b> met het woord <b>rapport</b> en de <b>maand</b>.' : `Typ bovenaan een <b>titel</b> met het woord <b>rapport</b> en de maand <b>${d.maand}</b>, bv. "Rapport dagelijks werk – ${d.maand}".`,
+          hints: ['Typ de titel in A1.', 'Maak de titel vet of groter, dat komt later ook aan bod.'],
+          check: ({ sheet }) => {
+            const rep = findReport(sheet), hdr = rep ? rep.hdr : 999;
+            const cells = sheet.filled().filter(a => parseAddr(a).r < hdr && /rapport/.test(norm(sheet.text(a))));
+            if (!cells.length) return no('Ik vind nog geen titel met het woord "rapport" boven je tabel.');
+            const okMonth = cells.some(a => own ? MAANDEN.some(m => norm(sheet.text(a)).includes(m)) : norm(sheet.text(a)).includes(d.maand));
+            return okMonth ? ok() : no(own ? 'Zet ook de maand in je titel.' : `Zet ook de maand ${d.maand} in je titel.`);
+          } },
+        { id: 't2', text: 'Zet je <b>naam</b> onder de titel.',
+          hints: ['Een aparte cel onder de titel is genoeg.', 'Typ je voornaam en naam in A2.'],
+          check: ({ sheet }) => sheet.filled().some(a => norm(sheet.text(a)).includes(norm(vn))) ? ok() : no(`Ik vind je naam (${vn}) nog niet in je rapport.`) },
+        { id: 't3', text: 'Maak een tabel met de <b>kopjes</b> Vak, Score, Maximum en Procent naast elkaar.',
+          hints: ['Vier kopjes op dezelfde rij, bv. in A4 tot D4.', 'Typ Vak, Score, Maximum en Procent in vier cellen naast elkaar.'],
+          check: ({ sheet }) => findReport(sheet) ? ok() : noTable() },
+        own
+          ? { id: 't4', text: 'Vul je <b>eigen vakken en punten</b> van deze maand in: minstens 5 vakken, met je score en het maximum.',
+            hints: [], check: needRep((sheet, rep) => {
+              if (rep.rows.length < 5) return no(`Ik vind ${rep.rows.length} vak${rep.rows.length === 1 ? '' : 'ken'}. Er moeten er minstens 5 zijn.`);
+              for (const r of rep.rows) {
+                const s = numOf(sheet.calc(rep.A('score', r))), m = numOf(sheet.calc(rep.A('max', r)));
+                if (s == null) return no(`In ${rep.A('score', r)} staat geen score (getal).`);
+                if (m == null || m <= 0) return no(`In ${rep.A('max', r)} staat geen maximum (getal groter dan 0).`);
+                if (s > m) return no(`In rij ${r} is de score (${showV(s)}) hoger dan het maximum (${showV(m)}). Kijk je punten na.`);
+              }
+              return ok();
+            }) }
+          : { id: 't4', text: `Typ de <b>vakken en punten</b> over in je tabel, onder de kopjes:${tabel}`,
+            hints: ['Eén rij per vak, in dezelfde volgorde.', 'Typ het vak in de kolom Vak, de score onder Score en het maximum onder Maximum.'],
+            check: needRep((sheet, rep) => {
+              if (rep.rows.length !== d.vakken.length) return no(`Ik vind ${rep.rows.length} vakken in je tabel. Het moeten er ${d.vakken.length} zijn.`);
+              for (let k = 0; k < d.vakken.length; k++) {
+                const r = rep.rows[k], v = d.vakken[k];
+                if (norm(sheet.text(rep.A('vak', r))) !== norm(v.n)) return no(`In rij ${r} verwacht ik het vak ${v.n}, maar daar staat "${sheet.text(rep.A('vak', r))}".`);
+                if (numOf(sheet.value(rep.A('score', r))) !== v.s) return no(`De score van ${v.n} (${rep.A('score', r)}) moet ${v.s} zijn.`);
+                if (numOf(sheet.value(rep.A('max', r))) !== v.max) return no(`Het maximum van ${v.n} (${rep.A('max', r)}) moet ${v.max} zijn.`);
+              }
+              return ok();
+            }) },
+        { id: 't5', text: 'Bereken het <b>procent per vak</b> met een formule (score gedeeld door maximum) en toon het als <b>procent</b>.',
+          hints: ['Typ de formule één keer en trek ze door naar beneden.', 'Bv. =B5/C5 in de eerste rij, doortrekken, en dan de knop %.'],
+          check: needRep((sheet, rep) => {
+            if (!rep.rows.length) return no('Er staan nog geen vakken in je tabel.');
+            for (const r of rep.rows) {
+              const a = rep.A('pct', r), res = rowRatio(sheet, a, rep.A('score', r), rep.A('max', r), sheet.text(rep.A('vak', r)));
+              if (res) return res;
+              const f = pctFmt(sheet, a); if (f) return no(f);
+            }
+            return ok();
+          }) },
+        { id: 't6', text: 'Maak onder de vakken een rij <b>Totaal</b>: tel de scores en de maxima op met <b>SOM</b>, en bereken het procent.',
+          hints: ['Typ "Totaal" in de kolom Vak, onder het laatste vak.', 'Gebruik =SOM(...) onder Score en onder Maximum. Het procent is totaal score gedeeld door totaal maximum.'],
+          check: needRep((sheet, rep) => {
+            if (!rep.tot) return no('Ik vind nog geen rij met het woord "Totaal" onder je vakken.');
+            const t = rep.tot, sc = rep.rows.map(r => rep.A('score', r)), mx = rep.rows.map(r => rep.A('max', r));
+            const sumOf = arr => arr.reduce((a, c) => a + (numOf(sheet.calc(c)) || 0), 0);
+            for (const [k, cells, word] of [['score', sc, 'scores'], ['max', mx, 'maxima']]) {
+              const a = rep.A(k, t);
+              const res = checkFormula(sheet, a, { expect: round9(sumOf(cells)), funcs: ['SUM'], funcMsg: `Tel de ${word} op met de functie SOM (stap 7).`, refs: cells, allRefsMsg: miss => allRowsMsg(`De SOM in ${a}`, miss) });
+              if (!res.ok) return res;
+            }
+            const pa = rep.A('pct', t), res = rowRatio(sheet, pa, rep.A('score', t), rep.A('max', t), 'totaal');
+            if (res) return res;
+            const f = pctFmt(sheet, pa); return f ? no(f) : ok();
+          }) },
+        { id: 't7', text: 'Maak een rij <b>Gemiddeld</b>: het gemiddelde van de scores en van de maxima met <b>GEMIDDELDE</b>, en het procent.',
+          hints: ['Typ "Gemiddeld" in de kolom Vak, onder Totaal.', 'Gebruik =GEMIDDELDE(...) onder Score en onder Maximum. Het procent is gemiddelde score gedeeld door gemiddeld maximum.'],
+          check: needRep((sheet, rep) => {
+            if (!rep.avg) return no('Ik vind nog geen rij met het woord "Gemiddeld" onder je vakken.');
+            const g = rep.avg, sc = rep.rows.map(r => rep.A('score', r)), mx = rep.rows.map(r => rep.A('max', r));
+            const avgOf = arr => arr.reduce((a, c) => a + (numOf(sheet.calc(c)) || 0), 0) / arr.length;
+            for (const [k, cells, word] of [['score', sc, 'scores'], ['max', mx, 'maxima']]) {
+              const a = rep.A(k, g);
+              const res = checkFormula(sheet, a, { expect: round9(avgOf(cells)), funcs: ['AVERAGE'], funcMsg: `Bereken het gemiddelde van de ${word} met de functie GEMIDDELDE.`, refs: cells, allRefsMsg: miss => allRowsMsg(`GEMIDDELDE in ${a}`, miss) });
+              if (!res.ok) return res;
+            }
+            const pa = rep.A('pct', g), f = sheet.formula(pa);
+            if (f && FX.info(f, 'en').funcs.includes('AVERAGE')) return no(`In ${pa} nam je het gemiddelde van de procenten. Weet je nog, de denkvraag? Hier deel je de gemiddelde score door het gemiddelde maximum: =${rep.A('score', g)}/${rep.A('max', g)}`);
+            const res = rowRatio(sheet, pa, rep.A('score', g), rep.A('max', g), 'gemiddeld');
+            if (res) return res;
+            const ff = pctFmt(sheet, pa); return ff ? no(ff) : ok();
+          }) },
+        { id: 't8', text: 'Werk je rapport mooi af: <b>kopjes vet</b>, <b>alle randen</b> rond de tabel (van de kopjes tot Gemiddeld) en een <b>titel</b> die vet of groter is.',
+          hints: ['Selecteer de hele tabel en kies "Alle randen".', 'Kopjes: selecteer ze en klik op B. Titel: klik erop en kies een grotere lettergrootte.'],
+          check: needRep((sheet, rep) => {
+            const hdrCells = ['vak', 'score', 'max', 'pct'].map(k => rep.A(k, rep.hdr));
+            const notBold = hdrCells.filter(a => !sheet.style(a).bold);
+            if (notBold.length) return no(`De kopjes ${list(notBold)} zijn nog niet vet.`);
+            const last = Math.max(rep.avg || 0, rep.tot || 0, rep.rows[rep.rows.length - 1] || rep.hdr);
+            const c1 = Math.min(...Object.values(rep.cols)), c2 = Math.max(...Object.values(rep.cols));
+            const miss = [];
+            for (let r = rep.hdr; r <= last; r++) for (let c = c1; c <= c2; c++) { const a = addr(c, r); if (!['left', 'right', 'top', 'bottom'].every(sd => sheet.hasEdge(a, sd))) miss.push(a); }
+            if (miss.length) return no(`Nog niet alle cellen van je tabel hebben randen, bv. ${list(miss.slice(0, 3))}. Selecteer de tabel van ${addr(c1, rep.hdr)} tot ${addr(c2, last)} en kies "Alle randen".`);
+            const title = sheet.filled().find(a => parseAddr(a).r < rep.hdr && /rapport/.test(norm(sheet.text(a))));
+            if (title) { const st = sheet.style(title); if (!st.bold && !(st.size > 11)) return no('Maak je titel vet of groter.'); }
+            return ok();
+          }) }
+      ] };
+    }
+  };
+
+  const MODULES = [m1, m2, m3, m4, m5, m6, m7, m8];
 
   /* Volgende modules (nog te bouwen) – getoond als vooruitblik. */
   const SOON = [
-    { nr: 8, title: 'Project: mijn maandrapport', short: 'Je bouwt je eigen rapport voor dagelijks werk.', project: true },
     { nr: 9, title: 'Excel kiest: ALS', short: 'Excel zegt zelf "juist" of "probeer opnieuw".' },
-    { nr: 10, title: 'Keuzelijsten en kleuren die reageren', short: 'Gegevensvalidatie en voorwaardelijke opmaak.' },
+    { nr: 10, title: 'Keuzelijsten en kleuren die reageren', short: 'Gegevensvalidatie en voorwaardelijke opmaak. Je rapport krijgt kleuren.' },
     { nr: 11, title: 'Klaar voor een gebruiker', short: 'Score tellen, afbeeldingen, blad beveiligen.' },
     { nr: 12, title: 'Project: mijn interactief werkblad', short: 'Je maakt een werkblad voor je klas of voor een andere klas.', project: true }
   ];

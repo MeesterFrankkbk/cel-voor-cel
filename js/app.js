@@ -130,7 +130,7 @@
     const allDone = cur === -1;
     const rows = MODULES.map((m, i) => {
       const open = isUnlocked(i), done = !!prog(m.id).test?.passed;
-      return h('div', { class: 'mrow' + (i === cur ? ' current' : '') + (open ? '' : ' locked') },
+      return h('div', { class: 'mrow' + (i === cur ? ' current' : '') + (open ? '' : ' locked') + (m.project ? ' project' : '') },
         h('div', { class: 'rn' }, m.nr),
         h('div', { class: 'mb' }, h('h3', {}, m.title), h('p', { class: 'small' }, open ? m.short : 'Dit deel gaat open als je de test van de vorige stap haalt.'), open ? h('div', { class: 'chips' }, moduleChips(m)) : null),
         h('div', { class: 'ma' }, open ? h('button', { class: 'btn' + (i === cur ? ' primary' : ''), onclick: () => openModule(m.id) }, done ? 'Bekijk' : (i === cur && (lessonsDone(m) || prog(m.id).practice) ? 'Verder' : 'Start')) : h('span', { class: 'muted small' }, 'Op slot')));
@@ -156,10 +156,11 @@
   function renderModule() {
     const m = MODULES[modIndex(S.mid)], p = prog(m.id);
     clear($app);
-    const tabs = [['learn', 'Leren', lessonsDone(m) === m.lessons.length], ['practice', 'Oefenen in Excel', !!p.practice?.passed], ['test', 'Test', !!p.test?.passed]];
+    const TL = m.tabLabels || {};
+    const tabs = [['learn', 'Leren', lessonsDone(m) === m.lessons.length], ['practice', TL.practice || 'Oefenen in Excel', !!p.practice?.passed], ['test', TL.test || 'Test', !!p.test?.passed]];
     const tabBar = h('div', { class: 'tabs', role: 'tablist' },
       tabs.map(([id, label, done], i) => h('button', { class: 'tab', role: 'tab', 'aria-selected': String(S.tab === id), onclick: () => { S.tab = id; render(); } }, h('span', { class: 'n' }, i + 1), label, done ? h('span', { class: 'done', 'aria-label': 'klaar' }, '✓') : null)));
-    const skip = S.tab !== 'test' && !p.test?.passed ? h('button', { class: 'btn ghost small skip', onclick: () => { S.tab = 'test'; render(); } }, 'Ik kan dit al → naar de test') : null;
+    const skip = S.tab !== 'test' && !p.test?.passed ? h('button', { class: 'btn ghost small skip', onclick: () => { S.tab = 'test'; render(); } }, m.project ? `Meteen naar ${(TL.test || 'de test').toLowerCase()} →` : 'Ik kan dit al → naar de test') : null;
     $app.append(
       h('div', { class: 'crumb' }, h('button', { class: 'btn ghost small', onclick: () => { S.view = 'home'; render(); } }, '← Leerlijn')),
       h('div', { class: 'mod-head' }, h('span', { class: 'eyebrow' }, 'Stap ' + m.nr), h('h1', {}, m.title), h('div', { class: 'chips' }, m.skills.map(s => h('span', { class: 'chip' }, s)))),
@@ -770,7 +771,7 @@
     if (mode === 'practice' && !p.practice?.seed) await save(m.id, { practice: { seed: newSeed(), started: new Date().toISOString() } });
     return mode === 'practice' ? prog(m.id).practice.seed : p.test?.seed;
   }
-  function fileWord(m, mode) { return mode === 'test' ? 'test' + m.nr : 'module' + m.nr; }
+  function fileWord(m, mode) { return m.project && mode === 'test' ? 'rapport' : mode === 'test' ? 'test' + m.nr : 'module' + m.nr; }
 
   async function downloadStart(m, mode, seed) {
     try {
@@ -797,8 +798,8 @@
 
     // --- zo begin je ---
     const start = h('section', { class: 'sheet pad', style: 'display:grid;gap:12px' },
-      h('h2', {}, mode === 'test' ? 'Je test' : 'Zo begin je'),
-      mode === 'test' ? h('p', { class: 'msg info' }, 'Dit is de test: er zijn geen hulplijnen. Lees elke opdracht goed. Je hebt ', h('b', {}, Math.round(PASS * 100) + '%'), ' nodig.') : null,
+      h('h2', {}, mode === 'test' ? (m.tabLabels?.test || 'Je test') : 'Zo begin je'),
+      mode === 'test' ? h('p', { class: 'msg info' }, m.project ? 'Geen hulplijnen. De app kijkt na of je rapport goed rekent en goed opgebouwd is. Je hebt ' : 'Dit is de test: er zijn geen hulplijnen. Lees elke opdracht goed. Je hebt ', h('b', {}, Math.round(PASS * 100) + '%'), ' nodig.') : null,
       m.newFile
         ? h('ol', { class: 'route' }, h('li', { html: 'Start <b>Excel</b> en kies <b>Lege werkmap</b>.' }), h('li', { html: 'Doe de opdrachten hieronder.' }), h('li', { html: `Bewaar via <b>Bestand → Opslaan als → OneDrive</b> met de naam <span class="addr">${fname}</span>.` }))
         : h('div', { style: 'display:grid;gap:10px' },
@@ -828,7 +829,7 @@
       drawHints(lvl);
       return h('li', { class: 'task' + (r ? (r.ok ? ' ok' : ' bad') : '') },
         h('div', { class: 'tn' }, r ? (r.ok ? '✓' : '✗') : k + 1),
-        h('div', { class: 'tb' }, h('p', { html: t.text }), r ? h('p', { class: 'res' }, r.ok ? 'Juist!' : r.msg) : null, hintBox));
+        h('div', { class: 'tb' }, h('div', { class: 'ttext', html: t.text }), r ? h('p', { class: 'res' }, r.ok ? 'Juist!' : r.msg) : null, hintBox));
     }));
 
     // --- opladen ---
@@ -842,10 +843,10 @@
         h('div', { class: 'bar' }, h('i', { style: `width:${pct}%` })),
         passed
           ? h('p', { class: 'msg ok' }, mode === 'test' ? h('span', {}, h('b', {}, 'Geslaagd! '), modIndex(m.id) < MODULES.length - 1 ? 'De volgende stap is open.' : 'Je hebt alle stappen gehaald.') : h('span', {}, h('b', {}, 'Alles juist! '), 'Je bent klaar voor de test.'))
-          : h('p', { class: 'msg info' }, mode === 'test' ? 'Nog niet geslaagd. Oefen de opdrachten met een ✗ nog eens en start daarna een nieuwe test.' : 'Verbeter de opdrachten met een ✗ in Excel, bewaar en laad opnieuw op.'),
+          : h('p', { class: 'msg info' }, mode === 'test' ? (m.project ? 'Nog niet in orde. Verbeter de onderdelen met een ✗ in je rapport en laad het opnieuw op.' : 'Nog niet geslaagd. Oefen de opdrachten met een ✗ nog eens en start daarna een nieuwe test.') : 'Verbeter de opdrachten met een ✗ in Excel, bewaar en laad opnieuw op.'),
         passed && mode === 'practice' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => { S.tab = 'test'; render(); window.scrollTo(0, 0); } }, 'Naar de test →'), h('button', { class: 'btn', onclick: async () => { await save(m.id, { practice: { seed: newSeed(), started: new Date().toISOString(), lastSeed: null, lastResults: null } }); render(); } }, 'Nieuwe oefeningen')) : null,
         passed && mode === 'test' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => { S.view = 'home'; render(); } }, 'Naar de leerlijn →')) : null,
-        !passed && mode === 'test' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: () => { S.tab = 'practice'; render(); } }, 'Oefenen'), h('button', { class: 'btn primary', onclick: () => startTest(m) }, 'Nieuwe test')) : null));
+        !passed && mode === 'test' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: () => { S.tab = 'practice'; render(); } }, 'Oefenen'), h('button', { class: 'btn primary', onclick: () => startTest(m) }, m.project ? 'Opnieuw opladen' : 'Nieuwe test')) : null));
     }
     const testFinished = mode === 'test' && last;
     if (!testFinished) side.append(uploadPanel(m, mode, seed, gen, fname));
@@ -857,14 +858,14 @@
     const p = prog(m.id).test || {};
     const prev = (S.student.attempts || []).filter(a => a.moduleId === m.id && a.mode === 'test');
     root.append(h('section', { class: 'sheet pad gate' },
-      h('h2', {}, p.passed ? 'Je haalde deze test al' : 'Klaar voor de test?'),
-      h('ul', { class: 'list-plain' },
+      h('h2', {}, p.passed ? (m.project ? 'Je eigen rapport is goedgekeurd' : 'Je haalde deze test al') : (m.project ? 'Klaar voor je eigen rapport?' : 'Klaar voor de test?')),
+      m.testGate ? h('div', { html: m.testGate }) : h('ul', { class: 'list-plain' },
         h('li', {}, 'Je krijgt ', h('b', {}, 'nieuwe opdrachten'), ', een beetje anders dan bij het oefenen.'),
         h('li', {}, 'Er zijn ', h('b', {}, 'geen hulplijnen'), '.'),
         h('li', {}, 'Je hebt ', h('b', {}, Math.round(PASS * 100) + '%'), ' juist nodig om naar de volgende stap te gaan.'),
         h('li', {}, 'Lukt het niet? Dan oefen je nog wat en start je een nieuwe test.')),
       prev.length ? h('p', { class: 'muted small' }, `Je deed deze test al ${prev.length}×. Beste score: ${p.best || 0}%.`) : null,
-      h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => startTest(m) }, p.passed ? 'Doe de test opnieuw' : 'Start de test'), !p.passed ? h('button', { class: 'btn', onclick: () => { S.tab = 'practice'; render(); } }, 'Eerst nog oefenen') : null)));
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => startTest(m) }, m.project ? (p.passed ? 'Opnieuw opladen' : 'Start mijn eigen rapport') : (p.passed ? 'Doe de test opnieuw' : 'Start de test')), !p.passed ? h('button', { class: 'btn', onclick: () => { S.tab = 'practice'; render(); } }, 'Eerst nog oefenen') : null)));
   }
   async function startTest(m) {
     await save(m.id, { test: { seed: newSeed(), open: true, started: new Date().toISOString(), lastSeed: null, lastResults: null } });
