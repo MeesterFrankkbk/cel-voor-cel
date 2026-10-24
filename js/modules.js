@@ -1409,11 +1409,189 @@
     }
   };
 
-  const MODULES = [m1, m2, m3, m4, m5, m6, m7, m8];
+  // ======================================================================
+  // MODULE 9 – Excel kiest: ALS
+  // ======================================================================
+  /* Rekent de formule in een cel uit alsof sommige cellen een andere inhoud hadden. */
+  function tryWith(sheet, a, over) {
+    const f = sheet.formula(a);
+    return FX.evaluate(f, { locale: 'en', get: (ref, sh) => (!sh && Object.prototype.hasOwnProperty.call(over, ref)) ? over[ref] : (sh ? (sheet.wb && sheet.wb.sheet(sh) ? sheet.wb.sheet(sh).calc(ref) : new FX.Err('#REF!')) : sheet.calc(ref)) });
+  }
+  const said = v => norm(showV(v));
+  function ifBasics(sheet, a, refs) {
+    const f = sheet.formula(a);
+    if (!f) { const r = checkFormula(sheet, a, {}); return r.ok ? no(`In ${a} moet een formule met ALS staan.`) : r; }
+    const inf = FX.info(f, 'en');
+    const words = inf.badNames.filter(x => /^[A-Z]{2,}$/i.test(x) && !FX.NL_EN[x] && !FX.EN_NL[x]);
+    if (words.length) return no(`Excel kent het woord ${words[0].toLowerCase()} niet. Tekst zet je tussen aanhalingstekens: "${words[0].toLowerCase()}".`);
+    const v = sheet.calc(a);
+    if (FX.isErr(v)) return checkFormula(sheet, a, {});
+    if (!inf.funcs.includes('IF')) return no(`Gebruik de functie ALS in ${a}.`);
+    const miss = refs.filter(r => !inf.cells.includes(r));
+    if (miss.length) return no(`De formule in ${a} moet ${list(refs)} gebruiken. ${list(miss)} ${miss.length > 1 ? 'ontbreken' : 'ontbreekt'}.`);
+    return null;
+  }
+  /* Is de juist/jammer-formule logisch goed? (de app probeert zelf antwoorden uit) */
+  function ifAnswerCheck(sheet, a, ans, sol, W, needEmpty) {
+    const base = ifBasics(sheet, a, [ans, sol]);
+    if (base) return base;
+    const s = sheet.calc(sol);
+    const wrong = isNum(s) ? s + 1 : String(s) + 'x';
+    const rOk = said(tryWith(sheet, a, { [ans]: s })), rBad = said(tryWith(sheet, a, { [ans]: wrong })), rEmpty = said(tryWith(sheet, a, { [ans]: null }));
+    const okW = norm(W.ok), badW = norm(W.bad), emW = norm(W.empty);
+    if (rOk === badW && rBad === okW) return no(`In ${a} staan "${W.ok}" en "${W.bad}" omgewisseld. Eerst wat Excel toont als het klopt, dan wat het toont als het niet klopt.`);
+    if (rOk !== okW) return no(`Als het antwoord juist is (${showV(s)}), toont je formule in ${a} "${rOk}". Dat moet "${W.ok}" zijn.`);
+    if (rBad !== badW) return no(`Als het antwoord fout is, toont je formule in ${a} "${rBad}". Dat moet "${W.bad}" zijn.`);
+    if (needEmpty && rEmpty !== emW) {
+      if (rEmpty === badW) return no(`Als ${ans} leeg is, toont ${a} nog "${W.bad}". Er moet "${W.empty}" staan. Begin met ALS(${ans}="";"${W.empty}";…)`);
+      return no(`Als ${ans} leeg is, toont ${a} "${rEmpty}". Er moet "${W.empty}" staan.`);
+    }
+    return ok();
+  }
+  const VRAGEN = [['6 x 7 =', 42], ['Hoofdstad van Italië?', 'Rome'], ['Verkleinwoord van bal?', 'balletje'], ['72 : 6 =', 12], ['De helft van 36?', 18], ['Planeet het dichtst bij de zon?', 'Mercurius'],
+    ['4 m = ... cm (alleen het getal)', 400], ['Meervoud van kind?', 'kinderen'], ['1000 - 632 =', 368], ['Hoeveel poten heeft een spin?', 8], ['Hoofdstad van Spanje?', 'Madrid'], ['Wat komt na goed, beter, ...?', 'best']];
+  function m9data(seed, mode) {
+    const r = rng(seed + '|m9|' + mode);
+    const test = mode === 'test';
+    const q = r.shuffle(VRAGEN).slice(0, 6);
+    const pattern = r.shuffle(['ok', 'ok', 'bad', 'bad', 'empty', 'empty']);
+    const answers = q.map((x, i) => pattern[i] === 'ok' ? x[1] : pattern[i] === 'empty' ? null : (isNum(x[1]) ? x[1] + r.pick([-2, -1, 1, 10]) : x[1].slice(0, -1)));
+    return {
+      q, pattern, answers,
+      W: test ? { ok: 'goed', bad: 'fout', empty: 'vul in' } : { ok: 'juist', bad: 'jammer', empty: 'vul in' },
+      S: test ? { t: r.int(5, 6), pass: 'Proficiat!', fail: 'Probeer opnieuw' } : { t: 4, pass: 'Goed gedaan!', fail: 'Oefen nog wat' },
+      score: r.int(2, 6)
+    };
+  }
+
+  const m9 = {
+    id: 'm9', nr: 9,
+    title: 'Excel kiest: ALS',
+    short: 'Met ALS laat je Excel zelf beslissen: "juist" of "jammer", "geslaagd" of "nog oefenen". Het hart van een interactief werkblad.',
+    skills: ['de functie ALS', 'vergelijken', 'juist of jammer', 'lege cel', 'ALS in een ALS', 'tekst tussen aanhalingstekens'],
+    lessons: [
+      { id: 'l1', title: 'Excel beslist',
+        body: `<p>Met <b>ALS</b> laat je Excel kiezen wat er in een cel komt. De functie heeft drie delen, met een puntkomma ertussen:</p>
+<p><b>=ALS(</b>voorwaarde<b>;</b> wat als het klopt<b>;</b> wat als het niet klopt<b>)</b></p>
+<p>Voorbeeld: <b>=ALS(B1&gt;=5;"geslaagd";"nog oefenen")</b>. Tekst zet je altijd tussen <b>aanhalingstekens</b>.</p>`,
+        widget: { type: 'sheetSim', rows: 3, cols: 2, widths: [100, 160], cells: { A1: 'Punten', B1: 7, A2: 'Boodschap' }, rounds: [
+          { select: 'B2', ask: 'Typ in <span class="addr">B2</span>: <b>=ALS(B1&gt;=5;"geslaagd";"nog oefenen")</b>',
+            check: (s, ch) => {
+              if (ch !== 'B2') return null;
+              if (s.isErr('B2') && s.show('B2') === '#NAAM?') return no('Excel begrijpt een woord niet. Staat de tekst tussen aanhalingstekens "…"?');
+              if (!s.info('B2') || !s.info('B2').funcs.includes('IF')) return no('Gebruik de functie ALS.');
+              return norm(s.show('B2')) === 'geslaagd' ? ok('Juist! 7 is minstens 5, dus Excel kiest "geslaagd".') : no(`B2 toont "${s.show('B2')}". Kijk je formule na.`);
+            } },
+          { select: 'B1', ask: 'Verander de punten in <span class="addr">B1</span> in <b>3</b>. Wat kiest Excel nu?',
+            check: (s, ch) => ch !== 'B1' ? null : s.num('B1') === 3 && norm(s.show('B2')) === 'nog oefenen' ? ok('Excel koos zelf "nog oefenen". Jij hoeft niets te veranderen!') : no('Typ 3 in B1.') }
+        ] } },
+      { id: 'l2', title: 'Vergelijken',
+        body: `<p>De voorwaarde is een vergelijking. Excel antwoordt met <b>WAAR</b> of <b>ONWAAR</b>.</p>
+<p><span class="key">=</span> is gelijk aan · <span class="key">&lt;&gt;</span> is niet gelijk aan · <span class="key">&lt;</span> kleiner dan · <span class="key">&gt;</span> groter dan · <span class="key">&lt;=</span> kleiner dan of gelijk aan · <span class="key">&gt;=</span> groter dan of gelijk aan</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Wat geeft =7>=7?', options: ['WAAR', 'ONWAAR'], correct: 0, explain: '>= betekent groter dan of gelijk aan. 7 is gelijk aan 7.' },
+          { q: 'Je wil "geslaagd" vanaf 10 punten (10 is ook geslaagd). Welke voorwaarde?', options: ['B2>10', 'B2>=10', 'B2=10'], correct: 1, explain: 'Met > zou 10 punten net niet geslaagd zijn.' },
+          { q: 'Wat betekent <>?', options: ['is niet gelijk aan', 'is ongeveer gelijk aan', 'is kleiner of groter dan 0'], correct: 0, explain: '=ALS(C2<>B2;"jammer";"juist") werkt dus ook.' }
+        ] } },
+      { id: 'l3', title: 'Juist of jammer?',
+        body: `<p>Zo werkt een interactief werkblad: in kolom B staat de <b>oplossing</b>, in kolom C typt de leerling zijn <b>antwoord</b>, en in kolom D vergelijkt Excel de twee:</p>
+<p><b>=ALS(C2=B2;"juist";"jammer")</b></p>`,
+        widget: { type: 'sheetSim', rows: 2, cols: 4, widths: [90, 80, 80, 90], cells: { A1: 'Vraag', B1: 'Oplossing', C1: 'Antwoord', D1: 'Feedback', A2: '6 x 7 =', B2: 42 }, rounds: [
+          { select: 'D2', ask: 'Typ in <span class="addr">D2</span> de formule die "juist" of "jammer" toont.',
+            check: (s, ch) => {
+              if (ch !== 'D2') return null;
+              const i = s.info('D2');
+              if (!i || !i.funcs.includes('IF')) return no('Gebruik de functie ALS.');
+              if (s.isErr('D2')) return no('Excel begrijpt een woord niet. Staat de tekst tussen aanhalingstekens?');
+              if (!i.cells.includes('C2') || !i.cells.includes('B2')) return no('Vergelijk het antwoord (C2) met de oplossing (B2).');
+              return norm(s.show('D2')) === 'jammer' ? ok('Je formule werkt! C2 is nog leeg, dus toont Excel "jammer". Typ nu een antwoord.') : no(`D2 toont "${s.show('D2')}". Bij een leeg antwoord verwacht ik "jammer".`);
+            } },
+          { select: 'C2', ask: 'Typ het juiste antwoord <b>42</b> in <span class="addr">C2</span>.',
+            check: (s, ch) => ch !== 'C2' ? null : norm(s.show('D2')) === 'juist' ? ok('"juist"! Excel kijkt het antwoord voor jou na.') : no('Typ 42 in C2.') },
+          { select: 'C2', ask: 'Typ nu een fout antwoord in <span class="addr">C2</span>, bv. 40.',
+            check: (s, ch) => ch !== 'C2' ? null : norm(s.show('D2')) === 'jammer' ? ok('"jammer". Je werkblad werkt in beide richtingen.') : no('Typ een fout antwoord in C2.') }
+        ] } },
+      { id: 'l4', title: 'Eerst kijken of er iets staat',
+        body: `<p>Probleem: is het antwoord nog <b>leeg</b>, dan zegt het werkblad al "jammer". Dat is niet eerlijk!</p>
+<p>Oplossing: eerst kijken of de cel leeg is. <b>""</b> (twee aanhalingstekens zonder iets ertussen) betekent "leeg". Je zet een ALS in een ALS:</p>
+<p><b>=ALS(C2="";"vul in";ALS(C2=B2;"juist";"jammer"))</b></p>`,
+        widget: { type: 'sheetSim', rows: 2, cols: 4, widths: [90, 80, 80, 90], cells: { A1: 'Vraag', B1: 'Oplossing', C1: 'Antwoord', D1: 'Feedback', A2: '6 x 7 =', B2: 42, D2: '=ALS(C2=B2;"juist";"jammer")' }, rounds: [
+          { select: 'D2', ask: 'Verbeter de formule in <span class="addr">D2</span> zodat er "vul in" staat als C2 leeg is.',
+            check: (s, ch) => {
+              if (ch !== 'D2') return null;
+              const i = s.info('D2');
+              if (!i || i.funcs.filter(x => x === 'IF').length < 2) return no('Gebruik twee keer ALS: =ALS(C2="";"vul in";ALS(C2=B2;"juist";"jammer"))');
+              if (s.isErr('D2')) return no('Er loopt iets mis. Tel de haakjes en kijk of alle tekst tussen aanhalingstekens staat.');
+              return norm(s.show('D2')) === 'vul in' ? ok('Juist: C2 is leeg, dus "vul in".') : no(`D2 toont "${s.show('D2')}". Er moet "vul in" staan.`);
+            } },
+          { select: 'C2', ask: 'Typ <b>42</b> in <span class="addr">C2</span>. Wat zegt het werkblad nu?',
+            check: (s, ch) => ch !== 'C2' ? null : norm(s.show('D2')) === 'juist' ? ok('"juist"! Je werkblad is nu eerlijk.') : no('Typ 42 in C2.') }
+        ] } },
+      { id: 'l5', title: 'Tekst vergelijken',
+        body: `<p>Bij tekst let Excel op elk teken. Hoofdletters tellen <b>niet</b> mee, maar een <b>spatie</b> wel.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'De oplossing is "Rome". Een leerling typt "rome". Wat zegt =ALS(C2=B2;"juist";"jammer")?', options: ['juist', 'jammer'], correct: 0, explain: 'Hoofdletters en kleine letters zijn voor deze vergelijking hetzelfde.' },
+          { q: 'Een leerling typt "Rome " (met een spatie erachter). Wat zegt de formule?', options: ['juist', 'jammer'], correct: 1, explain: 'De spatie telt mee. In stap 11 leer je SPATIES.WISSEN, die zulke spaties weghaalt.' },
+          { q: 'De oplossing is 400. Een leerling typt "400 cm". Wat zegt de formule?', options: ['juist', 'jammer'], correct: 1, explain: '"400 cm" is tekst, geen getal. Zet daarom bij de vraag: typ alleen het getal.' }
+        ] } }
+    ],
+    startFile(seed, mode) {
+      const d = m9data(seed, mode), b = { bold: true };
+      const cells = { A1: { v: 'Mijn eerste interactief werkblad', bold: true, size: 14 }, A3: { v: 'Vraag', ...b }, B3: { v: 'Oplossing', ...b }, C3: { v: 'Antwoord', ...b }, D3: { v: 'Feedback', ...b },
+        A11: { v: 'Mijn score', ...b }, B11: d.score, A12: { v: 'Boodschap', ...b } };
+      d.q.forEach((x, i) => { cells['A' + (4 + i)] = x[0]; cells['B' + (4 + i)] = x[1]; if (d.answers[i] != null) cells['C' + (4 + i)] = d.answers[i]; });
+      return { name: mode === 'test' ? 'Test9_als.xlsx' : 'Module9_als.xlsx', spec: { sheetName: 'Werkblad', cells, colWidths: { A: 34, B: 13, C: 13, D: 14 } } };
+    },
+    gen(seed, mode) {
+      const d = m9data(seed, mode), W = d.W, S = d.S;
+      const emptyRows = d.pattern.map((p, i) => p === 'empty' ? 4 + i : null).filter(Boolean);
+      return { startFile: true, tasks: [
+        { id: 't1', text: `Maak in <span class="addr">D4</span> een formule met <b>ALS</b>: is het antwoord (C4) gelijk aan de oplossing (B4), dan toont Excel <b>"${W.ok}"</b>, anders <b>"${W.bad}"</b>.`,
+          hints: ['Drie delen: de voorwaarde, wat als het klopt, wat als het niet klopt. Tekst tussen aanhalingstekens.', `Typ =ALS(C4=B4;"${W.ok}";"${W.bad}")`],
+          check: ({ sheet }) => ifAnswerCheck(sheet, 'D4', 'C4', 'B4', W, false) },
+        { id: 't2', text: `Trek de formule door tot <span class="addr">D9</span>.`,
+          hints: ['Met de vulgreep, net als in stap 6.', 'Klik op D4 en sleep de vulgreep naar beneden tot D9.'],
+          check: ({ sheet }) => { for (let r = 5; r <= 9; r++) { const res = ifAnswerCheck(sheet, 'D' + r, 'C' + r, 'B' + r, W, false); if (!res.ok) return res; } return ok(); } },
+        { id: 't3', text: `Is een antwoord nog leeg, dan moet er <b>"${W.empty}"</b> staan in plaats van "${W.bad}". Verbeter de formule in D4 en trek ze opnieuw door tot D9.`,
+          hints: ['Zet een ALS in een ALS: eerst kijken of C4 leeg is.', `Typ =ALS(C4="";"${W.empty}";ALS(C4=B4;"${W.ok}";"${W.bad}")) en trek opnieuw door.`],
+          check: ({ sheet }) => {
+            const first = ifAnswerCheck(sheet, 'D4', 'C4', 'B4', W, true);
+            if (!first.ok) return first;
+            for (let r = 5; r <= 9; r++) { const res = ifAnswerCheck(sheet, 'D' + r, 'C' + r, 'B' + r, W, true); if (!res.ok) return no(`D4 is goed! Trek de verbeterde formule opnieuw door tot D9: in D${r} staat nog de oude formule.`); }
+            return ok();
+          } },
+        { id: 't4', text: `In <span class="addr">B11</span> staat de score. Laat in <span class="addr">B12</span> <b>"${S.pass}"</b> verschijnen als de score <b>${S.t} of meer</b> is, en anders <b>"${S.fail}"</b>.`,
+          hints: ['"… of meer" schrijf je als >= (groter dan of gelijk aan).', `Typ =ALS(B11>=${S.t};"${S.pass}";"${S.fail}")`],
+          check: ({ sheet }) => {
+            const base = ifBasics(sheet, 'B12', ['B11']);
+            if (base) return base;
+            const at = v => said(tryWith(sheet, 'B12', { B11: v }));
+            const P = norm(S.pass), Fa = norm(S.fail);
+            if (at(S.t + 2) === Fa && at(0) === P) return no(`"${S.pass}" en "${S.fail}" staan omgewisseld.`);
+            if (at(S.t) === Fa && at(S.t + 1) === P) return no(`Met precies ${S.t} punten toont je formule "${S.fail}". "${S.t} of meer" schrijf je met >= in plaats van >.`);
+            if (at(S.t) !== P || at(S.t + 3) !== P) return no(`Met ${S.t} punten of meer moet B12 "${S.pass}" tonen. Nu toont het "${at(S.t)}".`);
+            if (at(S.t - 1) !== Fa || at(0) !== Fa) return no(`Met minder dan ${S.t} punten moet B12 "${S.fail}" tonen. Nu toont het "${at(S.t - 1)}".`);
+            return ok();
+          } },
+        { id: 't5', text: `Test je werkblad: typ het <b>juiste antwoord</b> in de lege antwoordcellen (${list(emptyRows.map(r => 'C' + r))}). Toont kolom D nu "${W.ok}"?`,
+          hints: ['Kijk in kolom B wat de oplossing is.', 'Typ precies wat er in kolom B staat.'],
+          check: ({ sheet }) => {
+            for (const r of emptyRows) {
+              const c = sheet.value('C' + r), sol = sheet.value('B' + r);
+              if (c == null || String(c).trim() === '') return no(`C${r} is nog leeg.`);
+              if (said(sheet.calc('D' + r)) !== norm(W.ok) && norm(c) === norm(sol) && String(c) === String(c).trim()) return no(`Het antwoord in C${r} klopt, maar D${r} toont "${showV(sheet.calc('D' + r))}". Je formule werkt nog niet goed: kijk opdracht 1 tot 3 na.`);
+              if (said(sheet.calc('D' + r)) !== norm(W.ok)) return no(`In C${r} staat "${showV(c)}", maar D${r} toont "${showV(sheet.calc('D' + r))}". ${typeof c === 'string' && c !== c.trim() ? 'Er staat een spatie te veel.' : `De oplossing is ${showV(sol)}.`}`);
+            }
+            return ok();
+          } }
+      ] };
+    }
+  };
+
+  const MODULES = [m1, m2, m3, m4, m5, m6, m7, m8, m9];
 
   /* Volgende modules (nog te bouwen) – getoond als vooruitblik. */
   const SOON = [
-    { nr: 9, title: 'Excel kiest: ALS', short: 'Excel zegt zelf "juist" of "probeer opnieuw".' },
     { nr: 10, title: 'Keuzelijsten en kleuren die reageren', short: 'Gegevensvalidatie en voorwaardelijke opmaak. Je rapport krijgt kleuren.' },
     { nr: 11, title: 'Klaar voor een gebruiker', short: 'Score tellen, afbeeldingen, blad beveiligen.' },
     { nr: 12, title: 'Project: mijn interactief werkblad', short: 'Je maakt een werkblad voor je klas of voor een andere klas.', project: true }

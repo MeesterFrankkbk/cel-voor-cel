@@ -27,6 +27,7 @@ Open je `index.html` zonder Netlify (bv. lokaal), dan start de app in **demomodu
 6. Je eerste formules (=, + − * /, celadressen, doortrekken, haakjes, foutmeldingen)
 7. Functies (SOM, GEMIDDELDE, MIN, MAX, MEDIAAN, AANTAL, AFRONDEN)
 8. Project: mijn maandrapport (oefenrapport met gegeven punten, daarna eigen rapport met echte punten)
+9. Excel kiest: ALS (juist/jammer, lege cel, ALS in een ALS, boodschap bij een score)
 
 Het ontwerp van elke stap staat in de map `docs/`.
 

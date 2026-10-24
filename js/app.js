@@ -677,7 +677,7 @@
       function commit() {
         const t = fx.value.trim(), a = cur;
         if (t === '') delete vals[a];
-        else if (t.startsWith('=')) vals[a] = t.replace(/\s+/g, '');
+        else if (t.startsWith('=')) vals[a] = t.split('"').map((part, k) => k % 2 ? part : part.replace(/\s+/g, '')).join('"');
         else if (/^-?\d+(,\d+)?$/.test(t)) vals[a] = parseFloat(t.replace(',', '.'));
         else if (/^-?\d+(,\d+)?%$/.test(t)) vals[a] = parseFloat(t.replace(',', '.')) / 100;
         else vals[a] = t;
