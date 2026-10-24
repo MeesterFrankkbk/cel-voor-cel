@@ -11,8 +11,14 @@ const store = () => getStore({ name: 'celvoorcel', consistency: 'strong' });
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const fail = (msg, status = 400) => json({ error: msg }, status);
 
+// Leest een omgevingsvariabele (werkt met beide manieren van Netlify).
+function env(name) {
+  let v;
+  try { v = globalThis.Netlify && globalThis.Netlify.env && globalThis.Netlify.env.get(name); } catch (e) { v = undefined; }
+  return (v || process.env[name] || '').trim();
+}
 function secret() {
-  const s = process.env.SESSION_SECRET || process.env.LEERKRACHT_WACHTWOORD;
+  const s = env('SESSION_SECRET') || env('LEERKRACHT_WACHTWOORD');
   if (!s) throw new Error('LEERKRACHT_WACHTWOORD is niet ingesteld in Netlify.');
   return 'cvc:' + s;
 }
@@ -85,7 +91,7 @@ export default async (req) => {
       // ---------------- leerkracht ----------------
       if (route === 'teacher/login' && method === 'POST') {
         const pw = String(body.wachtwoord || '');
-        const real = process.env.LEERKRACHT_WACHTWOORD || '';
+        const real = env('LEERKRACHT_WACHTWOORD');
         const a = crypto.createHash('sha256').update(pw).digest(), b = crypto.createHash('sha256').update(real).digest();
         if (!real || !crypto.timingSafeEqual(a, b)) return fail('Dit wachtwoord klopt niet.', 401);
         return json({ token: sign({ role: 't', exp: Date.now() + 1000 * 60 * 60 * 12 }) });
