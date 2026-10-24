@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "description": "Cel voor Cel – stap voor stap Excel leren (leerlingen 9-13 jaar)",
-  "type": "module",
   "dependencies": {
     "@netlify/blobs": "^8.1.0"
   }

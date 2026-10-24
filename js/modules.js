@@ -478,12 +478,359 @@
     }
   };
 
-  const MODULES = [m1, m2, m3];
+  // ======================================================================
+  // Doorvullen zoals Excel (vulgreep) – gebruikt door de simulator en de controles
+  // ======================================================================
+  const MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+  const MAANDEN_KORT = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+  const DAGEN = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag'];
+  const DAGEN_KORT = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
+  const LIJSTEN = [MAANDEN, DAGEN, MAANDEN_KORT, DAGEN_KORT];
+  const isNum = v => typeof v === 'number' && isFinite(v);
+  const round9 = x => Math.round(x * 1e9) / 1e9;
+  function likeCase(src, w) {
+    const s = String(src);
+    if (s.length > 1 && s === s.toUpperCase()) return w.toUpperCase();
+    if (s[0] === s[0].toUpperCase() && s[0] !== s[0].toLowerCase()) return w[0].toUpperCase() + w.slice(1);
+    return w;
+  }
+  /* Geeft 'count' nieuwe waarden na de startwaarden 'seeds', zoals Excel ze met de vulgreep maakt.
+     ctrl = Ctrl ingedrukt (bij één getal: tellen in plaats van kopiëren). */
+  function fillSeries(seeds, count, ctrl) {
+    const n = seeds.length, out = [];
+    if (!n || seeds.every(v => v == null || v === '')) return Array(count).fill(null);
+    if (seeds.every(isNum)) {
+      if (n === 1) { for (let i = 1; i <= count; i++) out.push(ctrl ? seeds[0] + i : seeds[0]); return out; }
+      // lineaire trend (kleinste kwadraten), zoals Excel
+      const xm = (n - 1) / 2, ym = seeds.reduce((a, b) => a + b, 0) / n;
+      let sxy = 0, sxx = 0; seeds.forEach((y, x) => { sxy += (x - xm) * (y - ym); sxx += (x - xm) * (x - xm); });
+      const slope = sxy / sxx, icpt = ym - slope * xm;
+      for (let i = 0; i < count; i++) out.push(round9(icpt + slope * (n + i)));
+      return out;
+    }
+    const lower = seeds.map(v => norm(v));
+    const L = LIJSTEN.find(l => lower.every(v => l.includes(v)));
+    if (L) {
+      const idx = lower.map(v => L.indexOf(v));
+      const step = n > 1 ? ((idx[n - 1] - idx[n - 2]) % L.length + L.length) % L.length || L.length : 1;
+      let cur = idx[n - 1];
+      for (let i = 0; i < count; i++) { cur = (cur + step) % L.length; out.push(likeCase(seeds[0], L[cur])); }
+      return out;
+    }
+    const m = seeds.map(v => /^(.*?)(\d+)$/.exec(String(v)));
+    if (m.every(Boolean) && m.every(x => x[1] === m[0][1])) {
+      const nums = m.map(x => +x[2]);
+      const step = n > 1 ? (nums[n - 1] - nums[0]) / (n - 1) : 1;
+      if (Number.isInteger(step)) {
+        for (let i = 1; i <= count; i++) out.push(m[0][1] + (nums[n - 1] + step * i));
+        return out;
+      }
+    }
+    for (let i = 0; i < count; i++) out.push(seeds[i % n]);
+    return out;
+  }
+
+  /* Leest een getal uit een cel (ook als het als tekst met komma getypt is). */
+  function numOf(v) {
+    if (isNum(v)) return v;
+    if (typeof v === 'string' && /^\s*-?\d+([.,]\d+)?\s*$/.test(v)) return parseFloat(v.replace(',', '.'));
+    return null;
+  }
+
+  /* Controleert een reeks die in kolom 'col' begint in rij 'row0'. */
+  function checkSeries(sheet, col, row0, expected) {
+    const numeric = isNum(expected[0]);
+    const show = v => v == null || v === '' ? 'niets' : (isNum(v) ? String(v).replace('.', ',') : `"${v}"`);
+    const ENG = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    const eq = (got, exp) => numeric ? numOf(got) === exp : norm(got) === norm(exp);
+    const at = r => col + r;
+    const got = expected.map((_, i) => sheet.value(at(row0 + i)));
+    const filled = got.filter(v => v != null && String(v).trim() !== '');
+    if (!filled.length) {
+      for (let r = 1; r <= row0 + 6; r++) if (r !== row0 && eq(sheet.value(at(r)), expected[0]) && eq(sheet.value(at(r + 1)), expected[1])) {
+        return no(`Je reeks begint in ${at(r)}. Ze moet in ${at(row0)} beginnen.`);
+      }
+      return no(`Kolom ${col} is nog leeg vanaf ${at(row0)}.`);
+    }
+    const bad = expected.findIndex((e, i) => !eq(got[i], e));
+    if (bad >= 0) {
+      if (!numeric) {
+        const kort = expected.map(e => { const l = LIJSTEN.find(x => x.includes(norm(e))); return l === MAANDEN ? MAANDEN_KORT[MAANDEN.indexOf(norm(e))] : l === DAGEN ? DAGEN_KORT[DAGEN.indexOf(norm(e))] : null; });
+        if (kort[bad] && norm(got[bad]) === kort[bad]) return no(`Schrijf de namen voluit: typ "${expected[0]}", niet "${kort[0]}".`);
+        if (ENG.includes(norm(got[bad]))) return no(`In ${at(row0 + bad)} staat een Engels woord: "${got[bad]}". Typ de Nederlandse naam: "${expected[0]}".`);
+      }
+      if (!eq(got[0], expected[0])) {
+        for (let r = 1; r <= row0 + 6; r++) if (r !== row0 && eq(sheet.value(at(r)), expected[0]) && eq(sheet.value(at(r + 1)), expected[1])) {
+          return no(`Je reeks begint in ${at(r)}. Ze moet in ${at(row0)} beginnen.`);
+        }
+        return no(`In ${at(row0)} moet ${expected[0]} staan. Nu staat daar ${show(got[0])}.`);
+      }
+      const same = filled.length > 2 && filled.every(v => norm(v) === norm(filled[0]));
+      if (same) {
+        if (numeric) return no(`Excel kopieerde het getal ${filled[0]}. Typ de eerste twee getallen, selecteer ze allebei en sleep dan pas.`);
+        return no(`In elke cel staat "${filled[0]}". Excel herkent het woord niet als lijst. Staat Excel in het Nederlands? Vraag het aan je leerkracht.`);
+      }
+      if (got[bad] == null || String(got[bad]).trim() === '') return no(`Je reeks stopt in ${at(row0 + bad - 1)}. Ga verder tot ${expected[expected.length - 1]} in ${at(row0 + expected.length - 1)}.`);
+      return no(`In ${at(row0 + bad)} verwacht ik ${expected[bad]}, maar daar staat ${show(got[bad])}.`);
+    }
+    const after = sheet.value(at(row0 + expected.length));
+    if (after != null && String(after).trim() !== '') return no(`Je sleepte te ver. Na ${expected[expected.length - 1]} moet je stoppen: ${at(row0 + expected.length)} moet leeg zijn.`);
+    return ok();
+  }
+
+  // ======================================================================
+  // MODULE 4 – Excel vult zelf aan
+  // ======================================================================
+  function m4data(seed, mode) {
+    const r = rng(seed + '|m4|' + mode);
+    const test = mode === 'test';
+    return {
+      N: r.int(30, 50), k: test ? r.int(6, 12) : r.int(3, 9), S: r.int(15, 25),
+      ms: test ? r.int(1, 11) : 0, ds: test ? r.int(1, 6) : 0, base: test ? 100 : 0
+    };
+  }
+  const range = (a, n, step) => Array.from({ length: n }, (_, i) => round9(a + i * (step == null ? 1 : step)));
+  const cyc = (L, start, n) => Array.from({ length: n }, (_, i) => L[(start + i) % L.length]);
+
+  const m4 = {
+    id: 'm4', nr: 4,
+    title: 'Excel vult zelf aan',
+    short: 'Met de vulgreep laat je Excel reeksen maken: tellen, tafels, maanden, dagen en een honderdveld in een paar seconden.',
+    skills: ['de vulgreep', 'reeksen met een stap', 'aftellen', 'maanden en dagen', 'kopie of reeks', 'honderdveld'],
+    lessons: [
+      { id: 'l1', title: 'De vulgreep',
+        body: `<p>Klik op een cel. Rechtsonder in het groene kader zie je een klein <b>vierkantje</b>. Dat is de <b>vulgreep</b>.</p>
+<p>Ga met de muis op de vulgreep staan: de muis wordt een dun <b>zwart plusje</b>. Hou de muisknop ingedrukt en sleep naar beneden of naar rechts. Excel vult de cellen voor je in.</p>
+<p>Probeer het hieronder. Het werkt net zoals in Excel.</p>`,
+        widget: { type: 'fillSim', rounds: [
+          { rows: 8, cols: 4, cells: { A1: 'ja' }, goal: { A1: 'ja', A2: 'ja', A3: 'ja', A4: 'ja', A5: 'ja', A6: 'ja' }, ask: 'Klik op <span class="addr">A1</span> en sleep de vulgreep naar beneden tot <span class="addr">A6</span>.' },
+          { rows: 11, cols: 4, cells: { A1: 1, A2: 2 }, goalSeries: { col: 'A', from: 1, values: range(1, 10) }, ask: 'Selecteer <span class="addr">A1</span> én <span class="addr">A2</span> samen. Sleep dan de vulgreep naar beneden tot <span class="addr">A10</span>.' },
+          { rows: 10, cols: 4, cells: { B1: 5, B2: 10 }, goalSeries: { col: 'B', from: 1, values: range(5, 8, 5) }, ask: 'Maak 5, 10, 15 … tot <b>40</b> in kolom B.' }
+        ] } },
+      { id: 'l2', title: 'Excel zoekt het patroon',
+        body: `<p>Excel kijkt naar de cellen die je selecteert en zoekt het <b>patroon</b>. Met twee getallen toon je de <b>stap</b>: van 5 naar 10 is +5, dus Excel gaat verder met 15, 20, 25 …</p>
+<p>Een stap kan ook naar beneden gaan: 20, 18 … wordt 16, 14, 12.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Je selecteert 5 en 10 en sleept naar beneden. Wat komt er na 10?', options: ['11', '15', '20'], correct: 1, explain: 'De stap is +5, dus 15.' },
+          { q: 'Je selecteert 20 en 18 en sleept. Wat komt er na 18?', options: ['16', '17', '19'], correct: 0, explain: 'De stap is −2, dus 16.' },
+          { q: 'Je typt "Les 1" in een cel en sleept naar beneden. Wat krijg je?', options: ['Les 1, Les 1, Les 1 …', 'Les 2, Les 3, Les 4 …', 'Les 11, Les 111 …'], correct: 1, explain: 'Staat er een getal achter een woord, dan telt Excel verder.' },
+          { q: 'Je typt alleen 7 in één cel en sleept naar beneden. Wat krijg je?', options: ['7, 8, 9 …', '7, 14, 21 …', '7, 7, 7 …'], correct: 2, explain: 'Met één getal ziet Excel geen stap. Het kopieert dan gewoon.' }
+        ] } },
+      { id: 'l3', title: 'Eén getal: kopie of reeks?',
+        body: `<p>Sleep je met maar één getal, dan <b>kopieert</b> Excel het. Wil je toch tellen? Dan heb je twee manieren:</p>
+<p>1. Hou <span class="key">Ctrl</span> ingedrukt terwijl je sleept.</p>
+<p>2. Of sleep gewoon. Na het slepen verschijnt rechtsonder een klein knopje: <b>Opvulopties</b>. Klik erop en kies <b>Reeks doorvoeren</b>.</p>`,
+        widget: { type: 'fillSim', rounds: [
+          { rows: 10, cols: 4, cells: { A1: 1 }, goalSeries: { col: 'A', from: 1, values: range(1, 8) }, options: true, ask: 'Maak 1 tot <b>8</b> in kolom A met maar één getal. Gebruik <span class="key">Ctrl</span> of het knopje <b>Opvulopties</b>.' },
+          { rows: 10, cols: 4, cells: { C1: 100 }, goalSeries: { col: 'C', from: 1, values: range(100, 6) }, options: true, ask: 'Maak 100, 101, 102 … tot <b>105</b> in kolom C.' }
+        ] } },
+      { id: 'l4', title: 'Lijsten die Excel kent',
+        body: `<p>Excel kent de <b>maanden</b> en de <b>dagen van de week</b>, ook afgekort (jan, feb … en ma, di …). Eén naam typen is genoeg: sleep en Excel gaat verder. Na december komt weer januari.</p>
+<p>Belangrijk: dit werkt alleen als <b>Excel in het Nederlands</b> staat. Krijg je overal hetzelfde woord? Vraag het dan aan je leerkracht.</p>`,
+        widget: { type: 'fillSim', rounds: [
+          { rows: 13, cols: 4, cells: { A1: 'januari' }, goalSeries: { col: 'A', from: 1, values: MAANDEN }, ask: 'Maak alle maanden in kolom A: van januari tot <b>december</b>.' },
+          { rows: 13, cols: 4, cells: { B1: 'maandag' }, goalSeries: { col: 'B', from: 1, values: DAGEN }, ask: 'Maak de dagen van de week in kolom B: van maandag tot <b>zondag</b>.' },
+          { rows: 13, cols: 4, cells: { C1: 'Ronde 1' }, goalSeries: { col: 'C', from: 1, values: range(1, 6).map(i => 'Ronde ' + i) }, ask: 'Maak Ronde 1 tot <b>Ronde 6</b> in kolom C.' }
+        ] } },
+      { id: 'l5', title: 'Een honderdveld in een paar seconden',
+        body: `<p>Een honderdveld met de hand typen duurt lang. Met een slim plan doet Excel het voor jou:</p>
+<p><b>1.</b> In kolom A: typ 1 en 11 onder elkaar en sleep naar beneden. Zo krijg je 1, 11, 21 … 91.</p>
+<p><b>2.</b> In kolom B: hetzelfde met 2 en 12.</p>
+<p><b>3.</b> Selecteer kolom A en B samen en sleep naar <b>rechts</b>. Elke rij ziet zijn eigen stap (+1) en telt verder.</p>`,
+        widget: { type: 'fillSim', rounds: [
+          { rows: 10, cols: 10, cells: { A1: 1, A2: 11 }, goalSeries: { col: 'A', from: 1, values: range(1, 10, 10) }, ask: 'Stap 1: maak 1, 11, 21 … tot <b>91</b> in kolom A.' },
+          { rows: 10, cols: 10, cells: Object.assign({ B1: 2, B2: 12 }, ...range(1, 10, 10).map((v, i) => ({ ['A' + (i + 1)]: v }))), goalSeries: { col: 'B', from: 1, values: range(2, 10, 10) }, keep: true, ask: 'Stap 2: maak 2, 12, 22 … tot <b>92</b> in kolom B.' },
+          { rows: 10, cols: 10, cells: Object.assign({}, ...range(1, 10, 10).map((v, i) => ({ ['A' + (i + 1)]: v, ['B' + (i + 1)]: v + 1 }))), goalBlock: { base: 0 }, ask: 'Stap 3: selecteer <span class="addr">A1:B10</span> en sleep de vulgreep naar rechts tot kolom <b>J</b>.' }
+        ] } }
+    ],
+    startFile(seed, mode) {
+      const d = m4data(seed, mode);
+      const b = { bold: true };
+      const cells = { A1: { v: 'Tellen', ...b }, C1: { v: 'Tafel van ' + d.k, ...b }, E1: { v: 'Aftellen', ...b }, G1: { v: 'Maanden', ...b }, I1: { v: 'Dagen', ...b }, K1: { v: 'Honderdveld', ...b } };
+      return { name: mode === 'test' ? 'Test4_reeksen.xlsx' : 'Module4_reeksen.xlsx', spec: { sheetName: 'Reeksen', cells, colWidths: { C: 12, G: 12, I: 12 } } };
+    },
+    gen(seed, mode) {
+      const d = m4data(seed, mode);
+      const months = cyc(MAANDEN, d.ms, 12), days = cyc(DAGEN, d.ds, 14), b = d.base;
+      return { startFile: true, tasks: [
+        { id: 't1', text: `Zet in kolom A, vanaf <span class="addr">A2</span>, de getallen <b>1 tot ${d.N}</b> onder elkaar.`,
+          hints: ['Typ de eerste twee getallen, selecteer ze allebei en sleep de vulgreep naar beneden.', `Tijdens het slepen toont Excel in een klein kadertje tot welk getal je komt. Laat los bij ${d.N}.`],
+          check: ({ sheet }) => checkSeries(sheet, 'A', 2, range(1, d.N)) },
+        { id: 't2', text: `Zet in kolom C, vanaf <span class="addr">C2</span>, de <b>tafel van ${d.k}</b>: ${d.k}, ${2 * d.k}, ${3 * d.k} … tot ${10 * d.k}.`,
+          hints: ['Welke twee getallen moet Excel zien om de stap te begrijpen?', `Typ ${d.k} in C2 en ${2 * d.k} in C3. Selecteer ze samen en sleep naar beneden tot ${10 * d.k}.`],
+          check: ({ sheet }) => checkSeries(sheet, 'C', 2, range(d.k, 10, d.k)) },
+        { id: 't3', text: `Tel in kolom E, vanaf <span class="addr">E2</span>, <b>af van ${d.S} tot 1</b>.`,
+          hints: ['Excel kan ook naar beneden tellen. Toon de stap met twee getallen.', `Typ ${d.S} en ${d.S - 1}, selecteer ze samen en sleep tot je bij 1 bent.`],
+          check: ({ sheet }) => checkSeries(sheet, 'E', 2, range(d.S, d.S, -1)) },
+        { id: 't4', text: mode === 'test' ? `Zet in kolom G, vanaf <span class="addr">G2</span>, <b>twaalf maanden</b> na elkaar, te beginnen met <b>${months[0]}</b>.` : `Zet in kolom G, vanaf <span class="addr">G2</span>, de <b>twaalf maanden</b>: januari tot december.`,
+          hints: ['Excel kent de maanden. Eén maand typen is genoeg.', `Typ ${months[0]} in G2 en sleep de vulgreep 11 cellen naar beneden, tot ${months[11]}.`],
+          check: ({ sheet }) => checkSeries(sheet, 'G', 2, months) },
+        { id: 't5', text: `Zet in kolom I, vanaf <span class="addr">I2</span>, de dagen van <b>twee weken</b> (14 dagen), te beginnen met <b>${days[0]}</b>.`,
+          hints: ['Na zondag begint Excel vanzelf weer met maandag.', `Typ ${days[0]} in I2 en sleep tot I15.`],
+          check: ({ sheet }) => checkSeries(sheet, 'I', 2, days) },
+        { id: 't6', text: `Maak in <span class="addr">K2:T11</span> een <b>honderdveld van ${b + 1} tot ${b + 100}</b>: ${b + 1} tot ${b + 10} naast elkaar in rij 2, ${b + 11} tot ${b + 20} in rij 3, enzovoort.`,
+          hints: [`Begin met de eerste twee kolommen. Welk getal staat onder ${b + 1}? En onder ${b + 2}?`, `Typ ${b + 1} en ${b + 11} in K2 en K3 en sleep naar beneden tot K11. Doe hetzelfde met ${b + 2} en ${b + 12} in kolom L. Selecteer dan K2:L11 samen en sleep naar rechts tot kolom T.`],
+          check: ({ sheet }) => {
+            const val = (c, r) => numOf(sheet.value(addr(11 + c, 2 + r)));
+            let wrong = null, empty = 0, turned = true;
+            for (let r = 0; r < 10; r++) for (let c = 0; c < 10; c++) {
+              const v = val(c, r), e = b + r * 10 + c + 1;
+              if (v == null) empty++;
+              if (v !== b + c * 10 + r + 1) turned = false;
+              if (v !== e && !wrong) wrong = { a: addr(11 + c, 2 + r), e, v };
+            }
+            if (!wrong) {
+              const extra = [addr(21, 2), addr(11, 12)].filter(a => !sheet.isEmpty(a));
+              return extra.length ? no(`Je honderdveld klopt, maar je ging te ver: ${list(extra)} moet leeg zijn.`) : ok();
+            }
+            if (empty === 100) return no('Het honderdveld is nog leeg. Begin in K2.');
+            if (turned) return no(`Je honderdveld staat gekanteld: ${b + 1} tot ${b + 10} moet naast elkaar in rij 2 staan, niet onder elkaar.`);
+            if (empty > 0 && wrong.v == null) return no(`Je honderdveld is nog niet af. In ${wrong.a} moet ${wrong.e} komen.`);
+            return no(`In ${wrong.a} verwacht ik ${wrong.e}, maar daar staat ${wrong.v == null ? 'niets' : wrong.v}.`);
+          } }
+      ] };
+    }
+  };
+
+  // ======================================================================
+  // MODULE 5 – Getallen tonen
+  // ======================================================================
+  const nlNum = (v, d) => (d == null ? String(+(+v).toPrecision(10)) : (+v).toFixed(d)).replace('.', ',');
+  const pctStr = (v, d) => nlNum(v * 100, d) + '%';
+  const euroStr = (v, d) => '€ ' + nlNum(v, d);
+  const MAAND_LANG = MAANDEN;
+  const close = (a, b) => isNum(a) && Math.abs(a - b) < 1e-9;
+  /* een breuk kiezen waarvan het procent niet op een mooi getal of op ,5 uitkomt (zo zie je het afronden) */
+  function pickFraction(r, dec) {
+    for (let i = 0; i < 200; i++) {
+      const max = r.pick([15, 30, 35, 45, 60, 70]), score = r.int(Math.ceil(max * 0.5), max - 1);
+      const x = score / max * 100 * Math.pow(10, dec), frac = x - Math.floor(x);
+      if (frac > 0.08 && frac < 0.92 && Math.abs(frac - 0.5) > 0.08) return { score, max, v: score / max };
+    }
+    return { score: 23, max: 30, v: 23 / 30 };
+  }
+  function m5data(seed, mode) {
+    const r = rng(seed + '|m5|' + mode);
+    const test = mode === 'test';
+    const p1 = pickFraction(r, 0), p2 = pickFraction(r, 1);
+    const day = r.int(1, 28), month = r.int(1, 12), year = 2027;
+    return {
+      test, p1, p2,
+      prijs1: r.pick([2.5, 1.75, 3.2, 0.9, 4.6]), prijs2: r.pick([12, 8, 15, 20, 6]),
+      lang: r.pick([3.14159, 2.71828, 1.41421, 9.87654, 6.28318]), langDec: test ? 1 : 2,
+      date: { y: year, m: month, d: day }, lengte: r.pick([1.38, 1.42, 1.45, 1.51, 1.56, 1.62]),
+      labels: test
+        ? ['Toets Frans', 'Toets WO', 'Prijs pizza', 'Prijs schrift', 'Getal met veel decimalen', 'Datum van het schoolfeest', 'Lengte van mijn broer (m)']
+        : ['Toets wiskunde', 'Toets taal', 'Prijs ijsje', 'Prijs boek', 'Getal met veel decimalen', 'Datum van de uitstap', 'Mijn lengte (m)']
+    };
+  }
+  function fmtDiag(sheet, a, want, wantDec, original, origLabel) {
+    const orig = origLabel || nlNum(original);
+    const info = sheet.numFmt(a), v = sheet.value(a);
+    const names = { percent: 'procent', currency: 'euro', number: 'getal met vaste decimalen', date: 'datum', general: 'standaard', text: 'tekst' };
+    if (original != null && !close(v, original)) {
+      if (isNum(v) && Math.abs(v - original) < 0.5 * Math.pow(10, -(wantDec || 0)) * (want === 'percent' ? 0.01 : 1) + 1e-9) return no(`Je typte het getal in ${a} opnieuw. Dat mag niet: het getal zelf moet ${orig} blijven. Verander alleen hoe het eruitziet.`);
+      if (v == null) return no(`Cel ${a} is leeg. Er moet ${orig} in staan.`);
+      return no(`In ${a} staat niet meer het oorspronkelijke getal (${orig}). Klik op Ctrl + Z of download het startbestand opnieuw.`);
+    }
+    if (info.kind !== want) return no(`${a} is nog ${info.kind === 'general' ? 'niet opgemaakt' : 'opgemaakt als ' + names[info.kind]}. Het moet ${names[want]} worden.`);
+    if (wantDec != null && info.dec !== wantDec) return no(`${a} is ${names[want]}, goed! Maar met ${info.dec} ${info.dec === 1 ? 'decimaal' : 'decimalen'}. Het moet ${wantDec} ${wantDec === 1 ? 'decimaal' : 'decimalen'} zijn: klik op ${info.dec > wantDec ? 'Minder decimalen' : 'Meer decimalen'}.`);
+    return ok();
+  }
+
+  const m5 = {
+    id: 'm5', nr: 5,
+    title: 'Getallen tonen',
+    short: 'Excel bewaart een getal en kiest apart hoe het eruitziet. Je leert procent, euro, decimalen, datums en de komma.',
+    skills: ['waarde en weergave', 'procent', 'euro', 'meer en minder decimalen', 'datum typen', 'komma, geen punt'],
+    lessons: [
+      { id: 'l1', title: 'Wat Excel bewaart en wat je ziet',
+        body: `<p>In een cel kan <b>0,675</b> staan, terwijl je <b>68%</b> ziet. Het getal blijft hetzelfde. Alleen de <b>weergave</b> verandert.</p>
+<p>Wat er echt in de cel zit, zie je bovenaan in de <b>formulebalk</b>. De knoppen om de weergave te kiezen, staan op de tab Start in de groep <b>Getal</b>: <b>%</b> (procent), <b>€</b> (valuta), <b>Meer decimalen</b> en <b>Minder decimalen</b>.</p>
+<p>Maak de cel hieronder hetzelfde als het voorbeeld. Kijk telkens ook naar de formulebalk.</p>`,
+        widget: { type: 'numSim', rounds: [
+          { v: 0.675, target: '68%' }, { v: 2.5, target: '€ 2,50' }, { v: 3.14159, target: '3,14' }, { v: 0.8333, target: '83,3%' }
+        ] } },
+      { id: 'l2', title: 'Komma of punt?',
+        body: `<p>In België schrijf je een kommagetal met een <b>komma</b>: twee en een half is <b>2,5</b>. Excel op een Belgische computer verwacht dat ook.</p>
+<p>Typ je <b>2.5</b> met een punt, dan begrijpt Excel het niet als getal. Het wordt <b>tekst</b>, of soms zelfs een <b>datum</b>.</p>
+<p>Zo zie je het verschil: een <b>getal</b> staat rechts in de cel, <b>tekst</b> staat links.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Je wil twee en een half typen in Excel. Wat typ je?', options: ['2,5', '2.5', '2½'], correct: 0, explain: 'In België gebruik je een komma.' },
+          { q: 'Je typt 1.45 in een cel. Wat gebeurt er?', options: ['Excel maakt er 1,45 van', 'Excel ziet het als tekst of maakt er een datum van', 'Excel maakt er 145 van'], correct: 1, explain: 'Met een punt herkent Excel het niet als getal.' },
+          { q: 'Hoe zie je dat Excel iets als getal begrijpt?', options: ['Getallen staan rechts in de cel, tekst links', 'Getallen zijn vet', 'Getallen zijn blauw'], correct: 0, explain: 'Staat je getal links, dan is het tekst. Rekenen lukt dan niet.' }
+        ] } },
+      { id: 'l3', title: 'Procent',
+        body: `<p>Procent betekent "op honderd". <b>1</b> is 100%, <b>0,5</b> is 50% en <b>0,75</b> is 75%.</p>
+<p>Klik je op de knop <b>%</b>, dan vermenigvuldigt Excel het getal niet echt. Het <b>toont</b> 0,75 gewoon als 75%.</p>
+<p>Dat is handig voor je rapport: 27 op 40 is 27 gedeeld door 40 = 0,675. Met de knop % zie je 68%.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'In een cel staat 0,25. Je klikt op %. Wat zie je?', options: ['0,25%', '25%', '2,5%'], correct: 1, explain: '0,25 is 25 op 100.' },
+          { q: 'Een cel toont 68%. Wat kan er echt in de cel staan?', options: ['68', '0,675', '6,8'], correct: 1, explain: '0,675 is 67,5%. Zonder decimalen rondt Excel af naar 68%. In de formulebalk zie je het echte getal.' },
+          { q: 'Je typt 75% in een cel. Wat bewaart Excel?', options: ['0,75', '75', '7,5'], correct: 0, explain: 'Excel bewaart 0,75 en toont 75%.' }
+        ] } },
+      { id: 'l4', title: 'Datums',
+        body: `<p>Een datum typ je met schuine strepen: <b>15/3/2027</b> is 15 maart 2027. Excel herkent de datum en zet hem <b>rechts</b> in de cel.</p>
+<p>Weetje: Excel telt de <b>dagen</b>. Dag 1 is 1 januari 1900. Voor Excel is 1 januari 2027 dag <b>46388</b>. Daarom kan Excel ook rekenen met datums, bv. hoeveel dagen het nog is tot de vakantie.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Hoe typ je 15 maart 2027?', options: ['15/3/2027', '15 maart twintig zevenentwintig', '2027.3.15'], correct: 0, explain: 'Dag, maand en jaar met schuine strepen.' },
+          { q: 'Je typt een datum en hij staat links in de cel. Wat betekent dat?', options: ['Excel ziet het als tekst, niet als datum', 'Het is een extra mooie datum', 'Excel heeft hem afgerond'], correct: 0, explain: 'Een echte datum is een getal en staat rechts.' },
+          { q: 'Je zet de datum 2/1/1900 om naar Standaard. Welk getal zie je?', options: ['2', '1900', '21'], correct: 0, explain: '2 januari 1900 is dag 2 voor Excel.' }
+        ] } }
+    ],
+    startFile(seed, mode) {
+      const d = m5data(seed, mode), L = d.labels;
+      const cells = { A1: { v: 'Getallen tonen', bold: true, size: 14 },
+        A3: L[0], B3: d.p1.v, A4: L[1], B4: d.p2.v, A6: L[2], B6: d.prijs1, A7: L[3], B7: d.prijs2,
+        A9: L[4], B9: d.lang, A11: L[5], A12: L[6] };
+      return { name: mode === 'test' ? 'Test5_getallen.xlsx' : 'Module5_getallen.xlsx', spec: { sheetName: 'Getallen', cells, colWidths: { A: 28, B: 16 } } };
+    },
+    gen(seed, mode) {
+      const d = m5data(seed, mode), L = d.labels;
+      const dt = d.date, serial = X.excelSerial(dt.y, dt.m, dt.d);
+      const dateTxt = `${dt.d} ${MAAND_LANG[dt.m - 1]} ${dt.y}`, dateTyped = `${dt.d}/${dt.m}/${dt.y}`;
+      return { startFile: true, tasks: [
+        { id: 't1', text: `${L[0]} haalde ${d.p1.score} op ${d.p1.max}. In <span class="addr">B3</span> staat de uitkomst van ${d.p1.score} gedeeld door ${d.p1.max}. Toon het als <b>procent zonder decimalen</b>: je ziet dan <b>${pctStr(d.p1.v, 0)}</b>.`,
+          hints: ['Er is een knop die een getal als procent toont.', 'Klik op B3 en dan op de knop % (tab Start, groep Getal).'],
+          check: ({ sheet }) => fmtDiag(sheet, 'B3', 'percent', 0, d.p1.v, `de uitkomst van ${d.p1.score} gedeeld door ${d.p1.max}`) },
+        { id: 't2', text: `${L[1]}: ${d.p2.score} op ${d.p2.max}. Toon <span class="addr">B4</span> als <b>procent met 1 decimaal</b>: je ziet dan <b>${pctStr(d.p2.v, 1)}</b>.`,
+          hints: ['Eerst procent, dan één cijfer na de komma erbij.', 'Klik op %, daarna één keer op "Meer decimalen" (de knop met ←,0).'],
+          check: ({ sheet }) => fmtDiag(sheet, 'B4', 'percent', 1, d.p2.v, `de uitkomst van ${d.p2.score} gedeeld door ${d.p2.max}`) },
+        { id: 't3', text: `Toon de twee prijzen in <span class="addr">B6:B7</span> in <b>euro met 2 decimalen</b>: ${euroStr(d.prijs1, 2)} en ${euroStr(d.prijs2, 2)}.`,
+          hints: ['Selecteer de twee cellen samen, dan hoef je maar één keer te klikken.', 'Sleep over B6 en B7 en klik op de knop met het geldbiljet (€). Staat er een dollar? Klik op het pijltje ernaast en kies € Euro.'],
+          check: ({ sheet }) => { const a = fmtDiag(sheet, 'B6', 'currency', 2, d.prijs1); if (!a.ok) return a; return fmtDiag(sheet, 'B7', 'currency', 2, d.prijs2); } },
+        { id: 't4', text: `In <span class="addr">B9</span> staat een getal met veel decimalen. Toon het met <b>${d.langDec} ${d.langDec === 1 ? 'decimaal' : 'decimalen'}</b> (${nlNum(d.lang, d.langDec)}), <b>zonder</b> het opnieuw te typen.`,
+          hints: ['Excel kan minder cijfers tonen zonder het getal te veranderen.', 'Klik op B9 en klik een paar keer op "Minder decimalen" (de knop met ,00→,0).'],
+          check: ({ sheet }) => fmtDiag(sheet, 'B9', 'number', d.langDec, d.lang) },
+        { id: 't5', text: `Typ in <span class="addr">B11</span> de datum <b>${dateTxt}</b>.`,
+          hints: ['Dag, maand en jaar met schuine strepen.', `Typ ${dateTyped} en druk op Enter. Staat het rechts in de cel? Dan is het goed.`],
+          check: ({ sheet }) => {
+            const v = sheet.value('B11'), info = sheet.numFmt('B11');
+            if (v == null || String(v).trim() === '') return no('B11 is nog leeg.');
+            if (typeof v === 'string') return no(`Excel ziet "${v}" als tekst, niet als datum. Typ het zo: ${dateTyped}`);
+            if (info.kind !== 'date') return no(`In B11 staat het getal ${nlNum(v)}, geen datum. Typ de datum zo: ${dateTyped}`);
+            if (Math.round(v) !== serial) { const g = X.serialToDate(v); if (g.d === dt.m && g.m === dt.d && g.y === dt.y) return no(`Dag en maand zijn omgewisseld: Excel leest ${g.d} ${MAAND_LANG[g.m - 1]}. Typ eerst de dag, dan de maand: ${dateTyped}. Gebeurt het opnieuw? Dan staat Excel misschien in het Engels. Vraag het aan je leerkracht.`); return no(`In B11 staat de datum ${g.d} ${MAAND_LANG[g.m - 1]} ${g.y}. Het moet ${dateTxt} zijn.`); }
+            return ok();
+          } },
+        { id: 't6', text: `Typ in <span class="addr">B12</span> de lengte <b>${nlNum(d.lengte)} meter</b> als kommagetal.`,
+          hints: ['Op een Belgische computer gebruik je een komma, geen punt.', `Typ ${nlNum(d.lengte)} en druk op Enter. Het getal moet rechts in de cel staan.`],
+          check: ({ sheet }) => {
+            const v = sheet.value('B12'), info = sheet.numFmt('B12');
+            if (v == null || String(v).trim() === '') return no('B12 is nog leeg.');
+            if (typeof v === 'string') return /\./.test(v) ? no(`Je typte een punt: "${v}". Excel ziet dat als tekst. Typ ${nlNum(d.lengte)} met een komma.`) : no(`Excel ziet "${v}" als tekst. Typ alleen het getal: ${nlNum(d.lengte)}`);
+            if (info.kind === 'date') return no(`Excel maakte er een datum van. Maak de cel leeg (Delete), zet de notatie op Standaard en typ ${nlNum(d.lengte)} met een komma.`);
+            if (close(v, d.lengte * 100)) return no(`Je typte ${nlNum(v)}: dat zijn centimeters. Typ de lengte in meter: ${nlNum(d.lengte)}`);
+            if (!close(v, d.lengte)) return no(`In B12 staat ${nlNum(v)}. Het moet ${nlNum(d.lengte)} zijn.`);
+            return ok();
+          } }
+      ] };
+    }
+  };
+
+  const MODULES = [m1, m2, m3, m4, m5];
 
   /* Volgende modules (nog te bouwen) – getoond als vooruitblik. */
   const SOON = [
-    { nr: 4, title: 'Excel vult zelf aan', short: 'Reeksen met de vulgreep: 1 tot 20, maanden, dagen, een 100-veld.' },
-    { nr: 5, title: 'Getallen tonen', short: 'Procent, euro, decimalen en datums.' },
     { nr: 6, title: 'Je eerste formules', short: 'Rekenen met celadressen en formules doortrekken.' },
     { nr: 7, title: 'Functies', short: 'SOM, GEMIDDELDE, MEDIAAN, MIN, MAX en AFRONDEN.' },
     { nr: 8, title: 'Project: mijn maandrapport', short: 'Je bouwt je eigen rapport voor dagelijks werk.', project: true },
@@ -505,7 +852,7 @@
   }
 
   const PASS = 0.8;
-  const api = { MODULES, SOON, rng, newSeed, runChecks, PASS, KLEUREN };
+  const api = { MODULES, SOON, rng, newSeed, runChecks, PASS, KLEUREN, fillSeries, numOf, MAANDEN, DAGEN, nlNum };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CvcModules = api;
 })(typeof window !== 'undefined' ? window : globalThis);

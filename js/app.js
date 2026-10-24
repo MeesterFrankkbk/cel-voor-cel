@@ -442,6 +442,201 @@
       next();
       return h('div', { class: 'fsim' }, ui.cnt, ui.ask, h('div', { class: 'fs-cells' }, h('figure', {}, h('figcaption', {}, 'Voorbeeld'), tCell), h('figure', {}, h('figcaption', {}, 'Jouw cel'), mCell)), ribbon, h('div', { class: 'btn-row' }, chk), ui.fb);
     },
+    fillSim(w, onDone) {
+      const { fillSeries } = window.CvcModules;
+      const ui = roundsUI(w.rounds.length);
+      const box = h('div', {});
+      const restart = h('button', { class: 'btn small', onclick: () => startRound() }, '↺ Opnieuw');
+      const ctrlNote = h('span', { class: 'small muted' });
+      let i = 0, R, vals, sel, prev, lastFill, busy = false, ctrlDown = false;
+      let table, frame, handle, optsBtn, optsMenu, nb, wrap;
+      const A = (c, r) => COLS[c] + r;
+      const show = v => v == null ? '' : (typeof v === 'number' ? String(v).replace('.', ',') : v);
+      const expected = () => {
+        const e = Object.assign({}, R.cells);
+        if (R.goal) Object.assign(e, R.goal);
+        if (R.goalSeries) R.goalSeries.values.forEach((v, k) => { e[R.goalSeries.col + (R.goalSeries.from + k)] = v; });
+        if (R.goalBlock) for (let r = 0; r < 10; r++) for (let c = 0; c < 10; c++) e[A(c, r + 1)] = R.goalBlock.base + r * 10 + c + 1;
+        return e;
+      };
+      const same = (a, b) => (a == null || a === '') ? (b == null || b === '') : String(a).toLowerCase() === String(b).toLowerCase();
+
+      function build() {
+        table = h('table', { class: 'mini' });
+        const head = h('tr', {}, h('th', { class: 'corner' }));
+        for (let c = 0; c < R.cols; c++) head.append(h('th', {}, COLS[c]));
+        table.append(h('thead', {}, head));
+        const tb = h('tbody');
+        for (let r = 1; r <= R.rows; r++) { const tr = h('tr', {}, h('th', {}, r)); for (let c = 0; c < R.cols; c++) tr.append(h('td', { class: 'click', 'data-c': c, 'data-r': r })); tb.append(tr); }
+        table.append(tb);
+        frame = h('div', { class: 'sel-frame', hidden: true });
+        handle = h('div', { class: 'fill-handle', hidden: true, title: 'Vulgreep', 'aria-label': 'Vulgreep' });
+        optsMenu = h('div', { class: 'fill-menu', hidden: true },
+          h('button', { onclick: () => reapply(false) }, '○ Cellen kopiëren'),
+          h('button', { onclick: () => reapply(true) }, '○ Reeks doorvoeren'));
+        optsBtn = h('button', { class: 'fill-opts', hidden: true, title: 'Opvulopties', onclick: () => { optsMenu.hidden = !optsMenu.hidden; } }, '⊞ ▾');
+        wrap = h('div', { class: 'fs-wrap' }, table, frame, handle, optsBtn, optsMenu);
+        nb = h('b', {});
+        clear(box).append(h('div', { class: 'mini-namebox' }, 'Naamvak', nb), h('div', { class: 'grid-wrap' }, wrap));
+        table.addEventListener('pointerdown', e => {
+          const td = e.target.closest('td'); if (!td || busy) return;
+          e.preventDefault(); optsMenu.hidden = true;
+          const c = +td.dataset.c, r = +td.dataset.r;
+          sel = { c1: c, r1: r, c2: c, r2: r, ac: c, ar: r }; selecting = true; paint();
+        });
+        handle.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (!sel || busy) return; filling = true; optsMenu.hidden = true; });
+      }
+      let selecting = false, filling = false;
+      const tdAt = e => { const el = document.elementFromPoint(e.clientX, e.clientY); const td = el && el.closest && el.closest('td'); return td && table.contains(td) ? td : null; };
+      // automatisch scrollen als je tijdens het slepen de rand van het scherm nadert
+      let lastPt = null, scrollTimer = null;
+      const autoScroll = () => {
+        if (!(selecting || filling) || !lastPt) { scrollTimer = null; return; }
+        const edge = 60, y = lastPt.clientY;
+        const dy = y > innerHeight - edge ? 14 : y < edge + 60 ? -14 : 0;
+        if (dy) { window.scrollBy(0, dy); onMove(lastPt); }
+        scrollTimer = requestAnimationFrame(autoScroll);
+      };
+      function onMove(e) {
+        if (!table || !document.body.contains(table)) return;
+        if (selecting || filling) { lastPt = { clientX: e.clientX, clientY: e.clientY, ctrlKey: e.ctrlKey, metaKey: e.metaKey }; if (!scrollTimer) scrollTimer = requestAnimationFrame(autoScroll); }
+        ctrlDown = e.ctrlKey || e.metaKey;
+        const td = tdAt(e); if (!td) return;
+        const c = +td.dataset.c, r = +td.dataset.r;
+        if (selecting) { sel.c1 = Math.min(sel.ac, c); sel.c2 = Math.max(sel.ac, c); sel.r1 = Math.min(sel.ar, r); sel.r2 = Math.max(sel.ar, r); paint(); }
+        else if (filling) {
+          const dr = r - sel.r2, dc = c - sel.c2;
+          prev = dr > 0 && dr >= dc ? { dir: 'down', n: dr } : dc > 0 ? { dir: 'right', n: dc } : null;
+          paint();
+          if (prev) { const out = compute(prev.dir, prev.n, ctrlDown); const lastKey = Object.keys(out).pop(); nb.textContent = show(out[lastKey]); }
+        }
+      }
+      function onUp(e) {
+        if (!table || !document.body.contains(table)) return;
+        if (selecting) { selecting = false; paint(); return; }
+        if (filling) { filling = false; ctrlDown = e.ctrlKey || e.metaKey; const p = prev; prev = null; if (p) apply(p.dir, p.n, ctrlDown); else paint(); }
+      }
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+
+      function compute(dir, n, ctrl) {
+        const out = {};
+        if (dir === 'down') for (let c = sel.c1; c <= sel.c2; c++) {
+          const seeds = []; for (let r = sel.r1; r <= sel.r2; r++) seeds.push(vals[A(c, r)] ?? null);
+          fillSeries(seeds, n, ctrl).forEach((v, k) => { if (sel.r2 + 1 + k <= R.rows) out[A(c, sel.r2 + 1 + k)] = v; });
+        } else for (let r = sel.r1; r <= sel.r2; r++) {
+          const seeds = []; for (let c = sel.c1; c <= sel.c2; c++) seeds.push(vals[A(c, r)] ?? null);
+          fillSeries(seeds, n, ctrl).forEach((v, k) => { if (sel.c2 + 1 + k < R.cols) out[A(sel.c2 + 1 + k, r)] = v; });
+        }
+        return out;
+      }
+      function apply(dir, n, ctrl) {
+        lastFill = { dir, n, before: Object.assign({}, vals), sel: Object.assign({}, sel) };
+        Object.entries(compute(dir, n, ctrl)).forEach(([k, v]) => { if (v == null) delete vals[k]; else vals[k] = v; });
+        if (dir === 'down') sel.r2 = Math.min(R.rows, sel.r2 + n); else sel.c2 = Math.min(R.cols - 1, sel.c2 + n);
+        optsBtn.hidden = false;
+        paint(); evaluate(ctrl);
+      }
+      function reapply(ctrl) {
+        if (!lastFill) return;
+        vals = Object.assign({}, lastFill.before); sel = Object.assign({}, lastFill.sel); optsMenu.hidden = true;
+        apply(lastFill.dir, lastFill.n, ctrl);
+      }
+      function paint() {
+        table.querySelectorAll('td').forEach(td => {
+          const c = +td.dataset.c, r = +td.dataset.r, a = A(c, r);
+          td.textContent = show(vals[a]);
+          td.style.textAlign = typeof vals[a] === 'number' ? 'right' : 'left';
+          td.style.paddingInline = '5px';
+          const inSel = sel && c >= sel.c1 && c <= sel.c2 && r >= sel.r1 && r <= sel.r2;
+          td.classList.toggle('insel', !!inSel && !(sel.c1 === sel.c2 && sel.r1 === sel.r2));
+          const inPrev = prev && sel && (prev.dir === 'down' ? c >= sel.c1 && c <= sel.c2 && r > sel.r2 && r <= sel.r2 + prev.n : r >= sel.r1 && r <= sel.r2 && c > sel.c2 && c <= sel.c2 + prev.n);
+          td.classList.toggle('fillprev', !!inPrev);
+        });
+        if (!sel) { frame.hidden = handle.hidden = true; nb.textContent = ''; return; }
+        if (!filling) nb.textContent = A(sel.c1, sel.r1) + (sel.c1 !== sel.c2 || sel.r1 !== sel.r2 ? ':' + A(sel.c2, sel.r2) : '');
+        const tl = table.querySelector(`td[data-c="${sel.c1}"][data-r="${sel.r1}"]`), br = table.querySelector(`td[data-c="${sel.c2}"][data-r="${sel.r2}"]`);
+        const wr = wrap.getBoundingClientRect(), a = tl.getBoundingClientRect(), b = br.getBoundingClientRect();
+        Object.assign(frame.style, { left: (a.left - wr.left - 1) + 'px', top: (a.top - wr.top - 1) + 'px', width: (b.right - a.left + 1) + 'px', height: (b.bottom - a.top + 1) + 'px' });
+        frame.hidden = false;
+        const hs = handle.offsetWidth || 10;
+        Object.assign(handle.style, { left: (b.right - wr.left - hs / 2 - 1) + 'px', top: (b.bottom - wr.top - hs / 2 - 1) + 'px' });
+        handle.hidden = false;
+        Object.assign(optsBtn.style, { left: (b.right - wr.left + 6) + 'px', top: (b.bottom - wr.top + 4) + 'px' });
+        Object.assign(optsMenu.style, { left: (b.right - wr.left + 6) + 'px', top: (b.bottom - wr.top + 34) + 'px' });
+      }
+      function evaluate(ctrl) {
+        const exp = expected();
+        const keys = new Set([...Object.keys(exp), ...Object.keys(vals)]);
+        let wrong = 0, missing = 0, extra = 0;
+        keys.forEach(k => {
+          const e = exp[k], v = vals[k];
+          if (e == null && v != null && v !== '') extra++;
+          else if (e != null && (v == null || v === '')) missing++;
+          else if (e != null && !same(v, e)) wrong++;
+        });
+        const seeds = lastFill ? (() => { const s = lastFill.sel; const arr = []; for (let r = s.r1; r <= s.r2; r++) for (let c = s.c1; c <= s.c2; c++) arr.push(lastFill.before[A(c, r)]); return arr; })() : [];
+        if (!wrong && !missing && !extra) {
+          good(ui.fb, 'Juist! Excel deed het werk voor jou.'); busy = true; i++;
+          setTimeout(() => { busy = false; if (i >= w.rounds.length) { clear(box).append(h('p', { class: 'fb ok' }, 'Super! Je kan de vulgreep gebruiken.')); restart.hidden = true; ui.ask.textContent = ''; ui.cnt.textContent = ''; onDone(); } else startRound(); }, 1100);
+        } else if (wrong) {
+          const nums = seeds.filter(v => typeof v === 'number');
+          if (R.options && nums.length === 1 && seeds.length === 1 && !ctrl) bad(ui.fb, 'Excel kopieerde het getal. Klik op het knopje Opvulopties ⊞ en kies "Reeks doorvoeren", of klik op Opnieuw en hou Ctrl ingedrukt.', table);
+          else if (seeds.length === 1 && typeof seeds[0] === 'number') bad(ui.fb, 'Excel kopieerde het getal. Selecteer de eerste twee getallen samen voor je sleept.', table);
+          else bad(ui.fb, 'Dat is niet de reeks die we zoeken. Kijk welke cellen je selecteerde en klik op Opnieuw.', table);
+        } else if (extra && !missing) bad(ui.fb, 'Je sleepte te ver. Klik op Opnieuw en laat eerder los.', table);
+        else if (missing && !extra) { ui.fb.className = 'fb'; ui.fb.textContent = 'Goed bezig! Sleep nog verder.'; }
+        else bad(ui.fb, 'Dat klopt nog niet. Klik op Opnieuw.', table);
+      }
+      function startRound() {
+        R = w.rounds[i]; vals = Object.assign({}, R.cells); sel = null; prev = null; lastFill = null; busy = false;
+        build(); paint(); optsBtn.hidden = true;
+        ui.set(i, R.ask); ui.fb.className = 'fb'; ui.fb.textContent = '';
+        ctrlNote.textContent = R.options ? 'Op een tablet: gebruik het knopje Opvulopties ⊞ dat na het slepen verschijnt.' : '';
+      }
+      startRound();
+      return h('div', { class: 'q' }, ui.cnt, ui.ask, h('p', { class: 'small muted' }, 'Selecteer eerst de cel(len). Sleep dan het groene vierkantje rechtsonder.'), box, h('div', { class: 'btn-row' }, restart, ctrlNote), ui.fb);
+    },
+    numSim(w, onDone) {
+      const nl = window.CvcModules.nlNum;
+      const ui = roundsUI(w.rounds.length);
+      let i = 0, R, st;
+      const decShown = v => { const t = String(+(+v).toPrecision(10)); return t.includes('.') ? t.split('.')[1].length : 0; };
+      const disp = (v, s) => s.kind === 'percent' ? nl(v * 100, s.dec) + '%' : s.kind === 'currency' ? '€ ' + nl(v, s.dec) : s.kind === 'number' ? nl(v, s.dec) : nl(v);
+      const bar = h('div', { class: 'fx' }, h('span', { class: 'fx-l' }, 'fx'), h('span', { class: 'fx-v' }));
+      const tBar = h('div', { class: 'fx' }, h('span', { class: 'fx-l' }, 'fx'), h('span', { class: 'fx-v' }));
+      const tCell = h('div', { class: 'ncell' }), mCell = h('div', { class: 'ncell' });
+      const kindLbl = h('span', { class: 'nkind' });
+      const NAMES = { general: 'Standaard', number: 'Getal', percent: 'Percentage', currency: 'Valuta' };
+      const sync = () => {
+        mCell.textContent = disp(R.v, st);
+        bar.lastChild.textContent = st.kind === 'percent' ? nl(R.v * 100) + '%' : nl(R.v);
+        kindLbl.textContent = NAMES[st.kind];
+      };
+      const act = f => () => { f(); sync(); ui.fb.textContent = ''; };
+      const btn = (label, title, f) => h('button', { class: 'rb txt', title, 'aria-label': title, onclick: act(f) }, label);
+      const group = h('div', { class: 'ribbon' }, h('div', { class: 'rgroup' }, h('span', {}, 'Getal'),
+        h('div', { class: 'rbtns' }, kindLbl),
+        h('div', { class: 'rbtns' },
+          btn('€', 'Valuta (euro)', () => { st = { kind: 'currency', dec: 2 }; }),
+          btn('%', 'Procent', () => { st = { kind: 'percent', dec: 0 }; }),
+          btn('←,0', 'Meer decimalen', () => { if (st.kind === 'general') st = { kind: 'number', dec: Math.min(9, decShown(R.v) + 1) }; else st.dec = Math.min(9, st.dec + 1); }),
+          btn(',00→', 'Minder decimalen', () => { if (st.kind === 'general') st = { kind: 'number', dec: Math.max(0, decShown(R.v) - 1) }; else st.dec = Math.max(0, st.dec - 1); }),
+          btn('Standaard', 'Standaard', () => { st = { kind: 'general', dec: null }; }))));
+      const chk = h('button', { class: 'btn primary', onclick: () => {
+        if (mCell.textContent === R.target) { good(ui.fb, `Juist! Je ziet ${R.target}, maar in de cel zit nog altijd ${nl(R.v)}.`); i++; setTimeout(next, 1400); }
+        else bad(ui.fb, `Je cel toont ${mCell.textContent}. Het moet ${R.target} zijn.`, mCell);
+      } }, 'Klaar?');
+      function next() {
+        if (i >= w.rounds.length) { good(ui.fb, 'Knap! Je weet nu dat weergave en waarde twee verschillende dingen zijn.'); chk.disabled = true; return onDone(); }
+        R = w.rounds[i]; st = { kind: 'general', dec: null };
+        tCell.textContent = R.target; tBar.lastChild.textContent = /%$/.test(R.target) ? nl(R.v * 100) + '%' : nl(R.v); sync(); ui.set(i, 'Laat jouw cel er net zo uitzien als het voorbeeld.'); ui.fb.textContent = '';
+      }
+      next();
+      return h('div', { class: 'fsim' }, ui.cnt, ui.ask,
+        h('div', { class: 'fs-cells' }, h('figure', {}, h('figcaption', {}, 'Voorbeeld'), tBar, tCell), h('figure', {}, h('figcaption', {}, 'Jouw cel'), bar, mCell)),
+        group, h('div', { class: 'btn-row' }, chk), ui.fb);
+    },
     steps(w, onDone) {
       const on = new Set();
       const btn = h('button', { class: 'btn primary', disabled: true, onclick: () => { btn.disabled = true; onDone(); } }, w.confirm);

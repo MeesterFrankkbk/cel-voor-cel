@@ -360,6 +360,10 @@
       locked: xf.locked !== false
     };
   };
+  Sheet.prototype.numFmt = function (a) {
+    const st = this.style(a);
+    return numFmtInfo(st.numFmtId, this.styles.numFmts[st.numFmtId]);
+  };
   Sheet.prototype.colWidth = function (colNum) {
     const c = this.cols.find(k => colNum >= k.min && colNum <= k.max && k.width != null);
     return c ? c.width : this.defaultColWidth;
@@ -381,7 +385,34 @@
     return !!this.style(n).border[opp];
   };
 
-  const BUILTIN_FMT = { 0: 'General', 1: '0', 2: '0.00', 3: '#,##0', 4: '#,##0.00', 9: '0%', 10: '0.00%', 11: '0.00E+00', 14: 'd/m/yyyy', 49: '@' };
+  const BUILTIN_FMT = { 0: 'General', 1: '0', 2: '0.00', 3: '#,##0', 4: '#,##0.00', 9: '0%', 10: '0.00%', 11: '0.00E+00', 14: 'd/m/yyyy', 15: 'd-mmm-yy', 16: 'd-mmm', 17: 'mmm-yy', 22: 'd/m/yyyy h:mm', 49: '@' };
+
+  /* Wat voor getalnotatie is dit? { kind: general|number|percent|currency|date|text, dec } */
+  function numFmtInfo(id, code) {
+    id = +id || 0;
+    if (id === 0 && (!code || /^general$/i.test(code))) return { kind: 'general', dec: null, code: 'General' };
+    if (id === 9) return { kind: 'percent', dec: 0, code };
+    if (id === 10) return { kind: 'percent', dec: 2, code };
+    if ((id >= 14 && id <= 22) || (id >= 27 && id <= 36) || (id >= 45 && id <= 47) || (id >= 50 && id <= 58)) return { kind: 'date', dec: null, code };
+    if ([5, 6, 7, 8, 42, 44].includes(id) && !/[0#]/.test(code || '')) return { kind: 'currency', dec: [5, 6, 42].includes(id) ? 0 : 2, code };
+    if (id === 49 || code === '@') return { kind: 'text', dec: null, code };
+    code = code || BUILTIN_FMT[id] || 'General';
+    const first = code.split(';')[0];
+    const euro = /€|EUR/i.test(first);
+    const bare = first.replace(/"[^"]*"/g, '').replace(/\[^]/g, '').replace(/\[[^\]]*\]/g, '').replace(/_./g, '').replace(/\*./g, '');
+    const decM = /0\.(0+)/.exec(bare);
+    const dec = decM ? decM[1].length : 0;
+    if (/%/.test(bare)) return { kind: 'percent', dec, code };
+    if (euro) return { kind: 'currency', dec, code };
+    if (/[dyj]/i.test(bare) || /m{3,}/i.test(bare) || /(^|[\/\-. ])m{1,2}([\/\-. ]|$)/i.test(bare)) return { kind: 'date', dec: null, code };
+    if (/^general$/i.test(bare.trim())) return { kind: 'general', dec: null, code };
+    if (/[0#]/.test(bare)) return { kind: 'number', dec, code };
+    if (/@/.test(bare)) return { kind: 'text', dec: null, code };
+    return { kind: 'general', dec: null, code };
+  }
+  /* Datum -> Excel-dagnummer (1 = 1 januari 1900). */
+  function excelSerial(y, m, d) { return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 86400000); }
+  function serialToDate(n) { const t = new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000); return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() }; }
 
   function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase(); }
 
@@ -407,7 +438,7 @@
     return { ok: true, w, need };
   }
 
-  const api = { readWorkbook, colToNum, numToCol, parseAddr, parseRange, addr, eachCell, colorNames, norm, textWidth, fitCheck, applyTint };
+  const api = { numFmtInfo, excelSerial, serialToDate, readWorkbook, colToNum, numToCol, parseAddr, parseRange, addr, eachCell, colorNames, norm, textWidth, fitCheck, applyTint };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.XlsxCheck = api;
 })(typeof window !== 'undefined' ? window : globalThis);

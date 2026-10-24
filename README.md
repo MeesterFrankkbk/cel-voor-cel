@@ -17,6 +17,16 @@ De opslag (leerlingen, voortgang, opgeladen Excel-bestanden) gebeurt in **Netlif
 
 Open je `index.html` zonder Netlify (bv. lokaal), dan start de app in **demomodus**: alles blijft in die browser, het leerkrachtwachtwoord is dan `demo`.
 
+## Stappen die klaar zijn
+
+1. Rijen, kolommen en cellen
+2. Typen, verbeteren en kolombreedte
+3. Cellen opmaken
+4. Excel vult zelf aan (vulgreep, reeksen, maanden, dagen, honderdveld)
+5. Getallen tonen (procent, euro, decimalen, datum, komma)
+
+Het ontwerp van stap 4 en 5 staat in `docs/ontwerp-stap-4-5.md`.
+
 ## Hoe het werkt
 
 - **Aanmelden**: voornaam, naam, klas en een eigen code (4 tot 8 cijfers). De eerste keer maakt de leerling zelf zijn account. Code vergeten? De leerkracht stelt een nieuwe in.
@@ -28,7 +38,7 @@ Open je `index.html` zonder Netlify (bv. lokaal), dan start de app in **demomodu
 
 ## Wat de app in een Excel-bestand controleert
 
-Celinhoud, bladnaam, bestandsnaam, ingevoegde rijen, twee lijnen in een cel (Alt + Enter), kolombreedte, vet/schuin/onderstreept, letter- en opvulkleur (ook themakleuren), uitlijning, rijhoogte, samengevoegde cellen, lettergrootte en randen. De lezer kan ook al formules, gegevensvalidatie, voorwaardelijke opmaak en bladbeveiliging uitlezen, voor de volgende stappen.
+Celinhoud, reeksen (ook gekopieerd in plaats van doorgevuld, te ver gesleept, Engelse maandnamen), honderdveld, getalnotatie (procent, euro, aantal decimalen, datum), getal of tekst (komma/punt), bladnaam, bestandsnaam, ingevoegde rijen, twee lijnen in een cel (Alt + Enter), kolombreedte, vet/schuin/onderstreept, letter- en opvulkleur (ook themakleuren), uitlijning, rijhoogte, samengevoegde cellen, lettergrootte en randen. De lezer kan ook al formules, gegevensvalidatie, voorwaardelijke opmaak en bladbeveiliging uitlezen, voor de volgende stappen.
 
 ## Bestanden
 
