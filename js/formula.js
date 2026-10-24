@@ -393,7 +393,7 @@
     return '=' + out.replace(/^=/, '');
   }
 
-  const api = { Err, isErr, evaluate, info, shift, display, toDutch, tokenize, parse, NL_EN, EN_NL, ERR_NL, expandRange, parseRef, colToNum, numToCol };
+  const api = { compare: cmp, Err, isErr, evaluate, info, shift, display, toDutch, tokenize, parse, NL_EN, EN_NL, ERR_NL, expandRange, parseRef, colToNum, numToCol };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CvcFormula = api;
 })(typeof window !== 'undefined' ? window : globalThis);

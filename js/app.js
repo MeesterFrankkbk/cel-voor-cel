@@ -712,6 +712,134 @@
         h('div', { class: 'fxrow' }, h('span', { class: 'mini-namebox' }, nb), h('span', { class: 'fx-l' }, 'fx'), fx, enter),
         h('div', { class: 'grid-wrap' }, table), ui.fb);
     },
+    dvSim(w, onDone) {
+      // Nagebootst venster "Gegevensvalidatie" + de cel om het resultaat uit te proberen.
+      const ui = roundsUI(w.rounds.length);
+      let i = 0, R, stage = 'setup';
+      const cellBox = h('div', { class: 'dv-cell' });
+      const label = h('div', { class: 'dv-label' });
+      const allow = h('select', { class: 'in', id: 'dv-allow-' + Math.random().toString(36).slice(2, 6) },
+        ['Alle waarden', 'Geheel getal', 'Decimaal', 'Lijst'].map(t => h('option', {}, t)));
+      const oper = h('select', { class: 'in' }, ['tussen', 'groter dan', 'kleiner dan'].map(t => h('option', {}, t)));
+      const min = h('input', { class: 'in', 'aria-label': 'Minimum' }), max = h('input', { class: 'in', 'aria-label': 'Maximum' });
+      const bron = h('input', { class: 'in', 'aria-label': 'Bron', placeholder: 'bv. ja;nee' });
+      const showErr = h('input', { type: 'checkbox', checked: true });
+      const errTitle = h('input', { class: 'in', 'aria-label': 'Titel' }), errMsg = h('textarea', { class: 'in', rows: 2, 'aria-label': 'Foutbericht' });
+      const numRow = h('div', { class: 'dv-grid' }, h('label', { class: 'f' }, 'Gegevens', oper), h('label', { class: 'f' }, 'Minimum', min), h('label', { class: 'f' }, 'Maximum', max));
+      const listRow = h('label', { class: 'f' }, 'Bron (keuzes met een puntkomma ertussen)', bron);
+      const tabA = h('div', { class: 'dv-pane' }, h('label', { class: 'f' }, 'Toestaan', allow), numRow, listRow);
+      const tabB = h('div', { class: 'dv-pane', hidden: true }, h('label', { class: 'dv-check' }, showErr, ' Foutmelding weergeven als ongeldige gegevens zijn ingevoerd'), h('label', { class: 'f' }, 'Titel', errTitle), h('label', { class: 'f' }, 'Foutbericht', errMsg));
+      const tA = h('button', { role: 'tab', 'aria-selected': 'true', onclick: () => { tabA.hidden = false; tabB.hidden = true; tA.setAttribute('aria-selected', 'true'); tB.setAttribute('aria-selected', 'false'); } }, 'Instellingen');
+      const tB = h('button', { role: 'tab', 'aria-selected': 'false', onclick: () => { tabA.hidden = true; tabB.hidden = false; tA.setAttribute('aria-selected', 'false'); tB.setAttribute('aria-selected', 'true'); } }, 'Foutmelding');
+      const okBtn = h('button', { class: 'btn primary', onclick: () => apply() }, 'OK');
+      const dialog = h('div', { class: 'dv-dialog' }, h('div', { class: 'dv-title' }, 'Gegevensvalidatie'), h('div', { class: 'route-tabs dv-tabs' }, tA, tB), tabA, tabB, h('div', { class: 'btn-row' }, okBtn));
+      const popup = h('div', { class: 'dv-popup', hidden: true });
+      const sync = () => { const v = allow.value; numRow.hidden = !(v === 'Geheel getal' || v === 'Decimaal'); listRow.hidden = v !== 'Lijst'; };
+      allow.addEventListener('change', sync);
+      function apply() {
+        const g = R.goal, v = allow.value;
+        if (g.type === 'list') {
+          if (v !== 'Lijst') return bad(ui.fb, 'Kies bij Toestaan: Lijst.', dialog);
+          const raw = bron.value.trim();
+          if (!raw) return bad(ui.fb, 'Vul de keuzes in bij Bron.', dialog);
+          if (!raw.includes(';') && raw.includes(',')) return bad(ui.fb, 'In een Belgische Excel zet je een puntkomma tussen de keuzes, geen komma.', dialog);
+          const items = raw.split(';').map(x => x.trim()).filter(Boolean);
+          const want = g.items.map(x => x.toLowerCase()), got = items.map(x => x.toLowerCase());
+          const miss = want.filter(x => !got.includes(x)), extra = got.filter(x => !want.includes(x));
+          if (miss.length) return bad(ui.fb, `Deze keuze ontbreekt nog: ${miss.join(', ')}.`, dialog);
+          if (extra.length) return bad(ui.fb, `Deze keuze hoort er niet bij: ${extra.join(', ')}.`, dialog);
+          stage = 'use'; cellBox.replaceChildren(h('select', { class: 'in dv-select', onchange: e => { if (e.target.value.toLowerCase() === R.use.pick.toLowerCase()) { good(ui.fb, 'Juist! Met een keuzelijst kan je je niet meer vergissen bij het typen.'); next(); } else if (e.target.value) bad(ui.fb, 'Dat is een keuze, maar niet het juiste antwoord. Probeer nog eens.'); } }, h('option', { value: '' }, '▾ kies'), items.map(x => h('option', {}, x))));
+          good(ui.fb, 'Goed ingesteld! Klik nu op het pijltje in de cel en kies het juiste antwoord.');
+        } else {
+          if (v !== 'Geheel getal') return bad(ui.fb, v === 'Decimaal' ? 'Kies Geheel getal: er mogen geen kommagetallen in.' : 'Kies bij Toestaan: Geheel getal.', dialog);
+          if (oper.value !== 'tussen') return bad(ui.fb, 'Kies bij Gegevens: tussen.', dialog);
+          if (+min.value.replace(',', '.') !== g.min || +max.value.replace(',', '.') !== g.max) return bad(ui.fb, `Het minimum moet ${g.min} zijn en het maximum ${g.max}.`, dialog);
+          if (!showErr.checked || !errMsg.value.trim()) return bad(ui.fb, 'Ga naar het tabblad Foutmelding en typ een eigen foutbericht.', dialog);
+          stage = 'use';
+          const inp = h('input', { class: 'in dv-input', placeholder: 'typ en druk Enter' });
+          inp.addEventListener('keydown', e => {
+            if (e.key !== 'Enter') return;
+            const n = Number(inp.value.replace(',', '.'));
+            const okv = inp.value.trim() !== '' && Number.isInteger(n) && n >= g.min && n <= g.max;
+            if (!okv) {
+              popup.replaceChildren(h('b', {}, errTitle.value || 'Microsoft Excel'), h('p', {}, errMsg.value), h('button', { class: 'btn small', onclick: () => { popup.hidden = true; inp.value = ''; inp.focus(); } }, 'Opnieuw'));
+              popup.hidden = false; R.sawError = true;
+              good(ui.fb, 'Zie je? Excel toont jouw eigen foutmelding. Typ nu een goed antwoord.');
+            } else if (!R.sawError) { ui.fb.className = 'fb'; ui.fb.textContent = `Dat getal mag. Typ eerst eens ${R.use.bad} om je foutmelding te zien.`; inp.value = ''; }
+            else { good(ui.fb, 'Juist! Excel laat alleen goede getallen toe.'); next(); }
+          });
+          cellBox.replaceChildren(inp); inp.focus();
+          good(ui.fb, `Goed ingesteld! Typ nu eens ${R.use.bad} in de cel en druk op Enter.`);
+        }
+      }
+      function next() { i++; setTimeout(() => { if (i >= w.rounds.length) { okBtn.disabled = true; ui.ask.textContent = ''; ui.cnt.textContent = ''; good(ui.fb, 'Super! Je kan gegevensvalidatie instellen.'); onDone(); } else start(); }, 1400); }
+      function start() {
+        R = w.rounds[i]; stage = 'setup'; popup.hidden = true;
+        allow.value = 'Alle waarden'; bron.value = ''; min.value = ''; max.value = ''; errTitle.value = ''; errMsg.value = ''; showErr.checked = true; oper.value = 'tussen';
+        tA.click(); sync();
+        label.textContent = R.label; cellBox.replaceChildren(h('span', { class: 'muted small' }, '(leeg)'));
+        ui.set(i, R.ask); ui.fb.textContent = ''; ui.fb.className = 'fb';
+      }
+      start();
+      return h('div', { class: 'q' }, ui.cnt, ui.ask,
+        h('div', { class: 'dv-wrap' }, h('div', { class: 'dv-sheet' }, label, h('div', { class: 'dv-cellwrap' }, cellBox, popup)), dialog), ui.fb);
+    },
+    cfSim(w, onDone) {
+      // Regelbouwer voor voorwaardelijke opmaak, met meteen zichtbare kleuren.
+      const F = window.CvcFormula;
+      const PRESETS = [
+        { name: 'Lichtrode opvulling met donkerrode tekst', fill: '#FFC7CE', font: '#9C0006', col: 'rood' },
+        { name: 'Gele opvulling met donkergele tekst', fill: '#FFEB9C', font: '#9C5700', col: 'geel' },
+        { name: 'Groene opvulling met donkergroene tekst', fill: '#C6EFCE', font: '#006100', col: 'groen' },
+        { name: 'Rode tekst', fill: null, font: '#E00000', col: 'rood' }
+      ];
+      const TYPES = ['Groter dan…', 'Kleiner dan…', 'Gelijk aan…', 'Tekst die bevat…'];
+      const ui = roundsUI(w.rounds.length);
+      let i = 0, R, rules = [];
+      const typeSel = h('select', { class: 'in' }, TYPES.map(t => h('option', {}, t)));
+      const valIn = h('input', { class: 'in', 'aria-label': 'Waarde', placeholder: 'waarde' });
+      const fmtSel = h('select', { class: 'in' }, PRESETS.map((p, k) => h('option', { value: k }, p.name)));
+      const list = h('ul', { class: 'cf-rules' });
+      const table = h('table', { class: 'mini cf-table' });
+      const parseVal = t => { t = String(t).trim(); if (/^-?\d+(,\d+)?%$/.test(t)) return parseFloat(t.replace(',', '.')) / 100; if (/^-?\d+(,\d+)?$/.test(t)) return parseFloat(t.replace(',', '.')); return t; };
+      const showVal = (v, pct) => typeof v === 'number' ? (pct ? F.display(+(v * 100).toFixed(4), 'nl') + '%' : F.display(v, 'nl')) : v;
+      const match = (r, v) => {
+        if (r.type === 'Tekst die bevat…') return String(v).toLowerCase().includes(String(r.val).toLowerCase());
+        const c = F.compare(v, r.val);
+        return r.type === 'Groter dan…' ? (typeof v === typeof r.val && c > 0) : r.type === 'Kleiner dan…' ? (typeof v === typeof r.val && c < 0) : c === 0;
+      };
+      const colorOf = v => { const r = rules.find(x => match(x, v)); return r ? PRESETS[r.fmt] : null; };
+      function paint() {
+        clear(table).append(h('thead', {}, h('tr', {}, h('th', { class: 'corner' }), h('th', {}, 'A'))));
+        const tb = h('tbody');
+        tb.append(h('tr', {}, h('th', {}, 1), h('td', { class: 'cf-head' }, R.head)));
+        R.values.forEach((v, k) => { const p = colorOf(v); tb.append(h('tr', {}, h('th', {}, k + 2), h('td', { style: `text-align:${typeof v === 'number' ? 'right' : 'left'};padding-inline:8px;${p ? `background:${p.fill || 'transparent'};color:${p.font};` : ''}` }, showVal(v, R.pct)))); });
+        table.append(tb);
+        clear(list).append(...rules.map((r, k) => h('li', {}, h('span', {}, `${r.type.replace('…', '')} ${showVal(r.val, R.pct && typeof r.val === 'number')} → ${PRESETS[r.fmt].name}`), h('button', { class: 'btn ghost small', onclick: () => { rules.splice(k, 1); paint(); } }, '✕'))));
+        if (!rules.length) list.append(h('li', { class: 'muted small' }, 'Nog geen regels.'));
+      }
+      const add = h('button', { class: 'btn', onclick: () => {
+        if (!valIn.value.trim()) return bad(ui.fb, 'Vul een waarde in.', valIn);
+        rules.push({ type: typeSel.value, val: parseVal(valIn.value), fmt: +fmtSel.value }); valIn.value = ''; ui.fb.textContent = ''; paint();
+      } }, 'Regel toevoegen');
+      const chk = h('button', { class: 'btn primary', onclick: () => {
+        const wrong = [];
+        R.values.forEach((v, k) => { const p = colorOf(v), want = R.goal(v); const got = p ? p.col : null; if (got !== want) wrong.push({ v, want, got }); });
+        if (!wrong.length) { good(ui.fb, R.okMsg || 'Juist! De kleuren tonen meteen wat je moet weten.'); i++; setTimeout(() => { if (i >= w.rounds.length) { chk.disabled = add.disabled = true; ui.ask.textContent = ''; ui.cnt.textContent = ''; good(ui.fb, 'Knap! Je kan voorwaardelijke opmaak gebruiken.'); onDone(); } else start(); }, 1400); return; }
+        const x = wrong[0];
+        const allNum = R.pct && rules.some(r => typeof r.val === 'number' && r.val >= 1);
+        if (allNum) return bad(ui.fb, 'Je procenten zijn eigenlijk getallen tussen 0 en 1. Typ in de regel 50% of 0,5, niet 50.', table);
+        bad(ui.fb, `${showVal(x.v, R.pct)} ${x.got ? 'wordt nu ' + x.got : 'krijgt nog geen kleur'}${x.want ? `, maar moet ${x.want} worden.` : ', maar moet geen kleur krijgen.'}`, table);
+      } }, 'Klaar?');
+      function start() { R = w.rounds[i]; rules = []; paint(); ui.set(i, R.ask); ui.fb.textContent = ''; ui.fb.className = 'fb'; }
+      start();
+      return h('div', { class: 'q' }, ui.cnt, ui.ask,
+        h('div', { class: 'cf-wrap' }, h('div', { class: 'grid-wrap' }, table),
+          h('div', { class: 'cf-builder' }, h('div', { class: 'dv-title' }, 'Voorwaardelijke opmaak › Markeringsregels voor cellen'),
+            h('label', { class: 'f' }, 'Regel', typeSel), h('label', { class: 'f' }, 'Waarde', valIn), h('label', { class: 'f' }, 'met', fmtSel),
+            h('div', { class: 'btn-row' }, add), h('div', { class: 'small' }, h('b', {}, 'Regels:')), list)),
+        h('div', { class: 'btn-row' }, chk), ui.fb);
+    },
     numSim(w, onDone) {
       const nl = window.CvcModules.nlNum;
       const ui = roundsUI(w.rounds.length);

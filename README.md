@@ -28,6 +28,7 @@ Open je `index.html` zonder Netlify (bv. lokaal), dan start de app in **demomodu
 7. Functies (SOM, GEMIDDELDE, MIN, MAX, MEDIAAN, AANTAL, AFRONDEN)
 8. Project: mijn maandrapport (oefenrapport met gegeven punten, daarna eigen rapport met echte punten)
 9. Excel kiest: ALS (juist/jammer, lege cel, ALS in een ALS, boodschap bij een score)
+10. Keuzelijsten en kleuren die reageren (gegevensvalidatie, eigen foutmelding, voorwaardelijke opmaak, kleuren in het rapport)
 
 Het ontwerp van elke stap staat in de map `docs/`.
 
@@ -42,7 +43,7 @@ Het ontwerp van elke stap staat in de map `docs/`.
 
 ## Wat de app in een Excel-bestand controleert
 
-Formules (de app rekent ze zelf na, ook doorgetrokken formules: juiste adressen, juiste functie, juist bereik, getal getypt in plaats van formule, = vergeten, x in plaats van *), celinhoud, reeksen (ook gekopieerd in plaats van doorgevuld, te ver gesleept, Engelse maandnamen), honderdveld, getalnotatie (procent, euro, aantal decimalen, datum), getal of tekst (komma/punt), bladnaam, bestandsnaam, ingevoegde rijen, twee lijnen in een cel (Alt + Enter), kolombreedte, vet/schuin/onderstreept, letter- en opvulkleur (ook themakleuren), uitlijning, rijhoogte, samengevoegde cellen, lettergrootte en randen. De lezer kan ook al formules, gegevensvalidatie, voorwaardelijke opmaak en bladbeveiliging uitlezen, voor de volgende stappen.
+Gegevensvalidatie (keuzelijsten, gehele getallen, foutmelding) en voorwaardelijke opmaak (de app probeert de regels uit met voorbeeldwaarden), formules (de app rekent ze zelf na, ook doorgetrokken formules: juiste adressen, juiste functie, juist bereik, getal getypt in plaats van formule, = vergeten, x in plaats van *), celinhoud, reeksen (ook gekopieerd in plaats van doorgevuld, te ver gesleept, Engelse maandnamen), honderdveld, getalnotatie (procent, euro, aantal decimalen, datum), getal of tekst (komma/punt), bladnaam, bestandsnaam, ingevoegde rijen, twee lijnen in een cel (Alt + Enter), kolombreedte, vet/schuin/onderstreept, letter- en opvulkleur (ook themakleuren), uitlijning, rijhoogte, samengevoegde cellen, lettergrootte en randen. De lezer kan ook al formules, gegevensvalidatie, voorwaardelijke opmaak en bladbeveiliging uitlezen, voor de volgende stappen.
 
 ## Bestanden
 

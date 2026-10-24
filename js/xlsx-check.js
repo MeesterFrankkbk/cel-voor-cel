@@ -263,6 +263,7 @@
       const f = kid(d, 'font'), fi = kid(d, 'fill');
       res.dxfs.push({ font: f ? readFont(f) : null, fill: fi ? readFill(fi) : null });
     });
+    res.readDxf = d => { const f = kid(d, 'font'), fi = kid(d, 'fill'); return { font: f ? readFont(f) : null, fill: fi ? readFill(fi) : null }; };
     if (!res.fonts.length) res.fonts.push({});
     return res;
   }
@@ -313,17 +314,21 @@
     const prot = kid(sx, 'sheetProtection');
     const isProtected = !!prot && attr(prot, 'sheet') !== '0' && attr(prot, 'sheet') !== 'false' && attr(prot, 'sheet') !== null;
     const dataValidations = deep(sx, 'dataValidation').map(d => ({
-      sqref: attr(d, 'sqref') || textOf(kid(d, 'sqref')), type: attr(d, 'type'),
-      formula1: textOf(kid(d, 'formula1')), formula2: textOf(kid(d, 'formula2')),
-      showErrorMessage: attr(d, 'showErrorMessage') === '1', error: attr(d, 'error'), prompt: attr(d, 'prompt')
+      sqref: (attr(d, 'sqref') || textOf(kid(d, 'sqref'))).trim(), type: attr(d, 'type') || 'any', operator: attr(d, 'operator') || 'between',
+      formula1: textOf(kid(d, 'formula1')).trim(), formula2: textOf(kid(d, 'formula2')).trim(), errorTitle: attr(d, 'errorTitle'), errorStyle: attr(d, 'errorStyle') || 'stop',
+      showErrorMessage: ['1', 'true'].includes(attr(d, 'showErrorMessage')), error: attr(d, 'error'), prompt: attr(d, 'prompt')
     }));
     const conditionalFormats = [];
     deep(sx, 'conditionalFormatting').forEach(cf => {
       const sq = attr(cf, 'sqref') || textOf(kid(cf, 'sqref'));
-      kids(cf, 'cfRule').forEach(r => conditionalFormats.push({
-        sqref: sq, type: attr(r, 'type'), operator: attr(r, 'operator'), text: attr(r, 'text'),
-        formulas: kids(r, 'formula').map(textOf), dxf: attr(r, 'dxfId') !== null ? styles.dxfs[+attr(r, 'dxfId')] : null
-      }));
+      kids(cf, 'cfRule').forEach(r => {
+        const fs = kids(r, 'formula').map(textOf);
+        conditionalFormats.push({
+          sqref: (sq || '').trim(), type: attr(r, 'type'), operator: attr(r, 'operator'), text: attr(r, 'text'), priority: +(attr(r, 'priority') || 99),
+          formulas: fs.length ? fs : kids(r, 'f').map(textOf),
+          dxf: attr(r, 'dxfId') !== null ? styles.dxfs[+attr(r, 'dxfId')] : (kid(r, 'dxf') && styles.readDxf ? styles.readDxf(kid(r, 'dxf')) : null)
+        });
+      });
     });
     const sv = deep(sx, 'sheetView')[0];
     const showGrid = sv ? attr(sv, 'showGridLines') !== '0' && attr(sv, 'showGridLines') !== 'false' : true;
@@ -396,6 +401,73 @@
     this._memo[a] = v;
     return v;
   };
+  /* Ligt cel a in een sqref ("A1:B3 D5")? */
+  function inSqref(sqref, a) {
+    const p = parseAddr(a);
+    return String(sqref || '').split(/\s+/).filter(Boolean).some(part => { const g = parseRange(part); return p.c >= g.c1 && p.c <= g.c2 && p.r >= g.r1 && p.r <= g.r2; });
+  }
+  Sheet.prototype.dvAt = function (a) { return this.dataValidations.filter(d => inSqref(d.sqref, a)); };
+  Sheet.prototype.cfAt = function (a) { return this.conditionalFormats.filter(c => inSqref(c.sqref, a)).sort((x, y) => x.priority - y.priority); };
+  /* Welke opmaak krijgt cel a volgens de voorwaardelijke opmaak, als er 'value' in zou staan? */
+  Sheet.prototype.cfStyle = function (a, value) {
+    const out = { fill: null, font: null, rules: [] };
+    for (const r of this.cfAt(a)) {
+      if (!cfMatch(this, r, a, value)) continue;
+      out.rules.push(r);
+      if (r.dxf) { if (!out.fill && r.dxf.fill) out.fill = r.dxf.fill; if (!out.font && r.dxf.font && r.dxf.font.color) out.font = r.dxf.font.color; }
+    }
+    return out;
+  };
+  function cfMatch(sheet, r, a, value) {
+    if (!F) return false;
+    const ev = f => F.evaluate(f, { locale: 'en', get: (ref, sh) => sh ? (sheet.wb && sheet.wb.sheet(sh) ? sheet.wb.sheet(sh).calc(ref) : null) : (ref === a ? value : sheet.calc(ref)) });
+    const txt = v => v == null ? '' : String(v).toLowerCase();
+    switch (r.type) {
+      case 'cellIs': {
+        if (F.isErr(value)) return false;
+        const x = ev(r.formulas[0] || '0'), y = r.formulas[1] != null ? ev(r.formulas[1]) : null;
+        const c = (p, q) => F.compare(p, q);
+        switch (r.operator) {
+          case 'equal': return c(value, x) === 0;
+          case 'notEqual': return c(value, x) !== 0;
+          case 'greaterThan': return c(value, x) > 0;
+          case 'lessThan': return c(value, x) < 0;
+          case 'greaterThanOrEqual': return c(value, x) >= 0;
+          case 'lessThanOrEqual': return c(value, x) <= 0;
+          case 'between': { const lo = c(x, y) <= 0 ? x : y, hi = lo === x ? y : x; return c(value, lo) >= 0 && c(value, hi) <= 0; }
+          case 'notBetween': { const lo = c(x, y) <= 0 ? x : y, hi = lo === x ? y : x; return !(c(value, lo) >= 0 && c(value, hi) <= 0); }
+        }
+        return false;
+      }
+      case 'containsText': return txt(value).includes(txt(r.text));
+      case 'notContainsText': return !txt(value).includes(txt(r.text));
+      case 'beginsWith': return txt(value).startsWith(txt(r.text));
+      case 'endsWith': return txt(value).endsWith(txt(r.text));
+      case 'containsBlanks': return value == null || String(value).trim() === '';
+      case 'notContainsBlanks': return !(value == null || String(value).trim() === '');
+      case 'expression': {
+        const first = String(r.sqref).split(/\s+/)[0].split(':')[0];
+        const p = parseAddr(first), q = parseAddr(a);
+        const v = ev(F.shift(r.formulas[0] || 'FALSE', q.r - p.r, q.c - p.c));
+        return v === true || (typeof v === 'number' && v !== 0);
+      }
+    }
+    return false;
+  }
+  /* De keuzes van een keuzelijst (gegevensvalidatie 'list'). */
+  Sheet.prototype.dvListItems = function (dv) {
+    let f = String(dv.formula1 || '').trim();
+    if (/^".*"$/.test(f)) return f.slice(1, -1).split(/[,;]/).map(x => x.trim()).filter(Boolean);
+    f = f.replace(/^=/, '');
+    const m = /^(?:'?([^'!]+)'?!)?\$?([A-Z]{1,3})\$?(\d+)(?::\$?([A-Z]{1,3})\$?(\d+))?$/i.exec(f);
+    if (!m) return null;
+    const sh = m[1] ? (this.wb && this.wb.sheet(m[1])) : this;
+    if (!sh) return null;
+    const out = [];
+    eachCell(m[2] + m[3] + ':' + (m[4] || m[2]) + (m[5] || m[3]), x => { const v = sh.calc(x); if (v != null && String(v).trim() !== '') out.push(String(v)); });
+    return out;
+  };
+  Sheet.prototype.dvIsRange = function (dv) { return !/^".*"$/.test(String(dv.formula1 || '').trim()); };
   /* Wat staat er in de formule van deze cel? */
   Sheet.prototype.formulaInfo = function (a) { const f = this.formula(a); return f && F ? F.info(f, 'en') : null; };
   Sheet.prototype.numFmt = function (a) {

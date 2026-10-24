@@ -1588,11 +1588,177 @@
     }
   };
 
-  const MODULES = [m1, m2, m3, m4, m5, m6, m7, m8, m9];
+  // ======================================================================
+  // MODULE 10 – Keuzelijsten en kleuren die reageren
+  // ======================================================================
+  const WW = [['ik … (worden, tegenwoordige tijd)', 'word', ['word', 'wordt', 'werd', 'worden']], ['hij … (vinden, tegenwoordige tijd)', 'vindt', ['vind', 'vindt', 'vond', 'vinden']], ['wij … (lopen, verleden tijd)', 'liepen', ['lopen', 'liep', 'liepen', 'loopt']], ['jij … (antwoorden, tegenwoordige tijd)', 'antwoordt', ['antwoord', 'antwoordt', 'antwoordde', 'antwoorden']]];
+  const HOOFDSTEDEN = [['Hoofdstad van Italië?', 'Rome', ['Parijs', 'Rome', 'Brussel', 'Riga']], ['Hoofdstad van Spanje?', 'Madrid', ['Lissabon', 'Madrid', 'Rome', 'Berlijn']], ['Hoofdstad van Frankrijk?', 'Parijs', ['Parijs', 'Londen', 'Wenen', 'Praag']], ['Hoofdstad van Duitsland?', 'Berlijn', ['München', 'Berlijn', 'Hamburg', 'Bern']]];
+  const REKEN = [['6 x 7 =', 42], ['72 : 6 =', 12], ['1000 - 632 =', 368], ['De helft van 36?', 18], ['125 + 375 =', 500]];
+  const OVERIG = [['Verkleinwoord van bal?', 'balletje'], ['Planeet het dichtst bij de zon?', 'Mercurius'], ['Meervoud van kind?', 'kinderen'], ['Hoeveel poten heeft een spin?', 8], ['Wat komt na goed, beter, …?', 'best'], ['Hoeveel dagen heeft een week?', 7]];
+  function m10data(seed, mode) {
+    const r = rng(seed + '|m10|' + mode);
+    const test = mode === 'test';
+    const ww = r.pick(WW), hs = r.pick(HOOFDSTEDEN), rk = r.pick(REKEN), ov = r.shuffle(OVERIG).slice(0, 3);
+    const W = test ? { ok: 'goed', bad: 'fout' } : { ok: 'juist', bad: 'jammer' };
+    const lo = test ? 0.6 : 0.5, hi = test ? 0.85 : 0.8;
+    // rapportpunten: zorg voor procenten onder, tussen en boven de grenzen
+    const vakken = ['Wiskunde 1', 'Wiskunde 2', 'Taal 1', 'Taal 2', 'Frans 1', 'WO 1'];
+    const targets = r.shuffle([lo - 0.12, lo - 0.05, (lo + hi) / 2, (lo + hi) / 2 + 0.04, hi + 0.06, hi + 0.12]);
+    const rap = vakken.map((n, k) => { const max = r.pick([20, 25, 40, 50]); return { n, max, s: Math.max(1, Math.min(max, Math.round(targets[k] * max))) }; });
+    return { ww, hs, rk, ov, W, lo, hi, rap, maand: r.pick(['november', 'december', 'maart', 'mei']), test };
+  }
+  const pctTxt = v => nlNum(Math.round(v * 100)) + '%';
+
+  const m10 = {
+    id: 'm10', nr: 10,
+    title: 'Keuzelijsten en kleuren die reageren',
+    short: 'Je maakt keuzelijsten en laat alleen goede antwoorden toe. Met voorwaardelijke opmaak kleurt Excel zelf: groen bij juist, rood bij jammer. Ook je rapport krijgt kleuren.',
+    skills: ['keuzelijst', 'alleen getallen toelaten', 'eigen foutmelding', 'voorwaardelijke opmaak', 'kleuren bij juist en jammer', 'kleuren in je rapport'],
+    lessons: [
+      { id: 'l1', title: 'Een keuzelijst',
+        body: `<p>Met een <b>keuzelijst</b> kiest de gebruiker het antwoord met een pijltje. Zo kan hij zich niet vertypen.</p>
+<p>Klik op de cel. Ga naar het tabblad <b>Gegevens</b> en klik op <b>Gegevensvalidatie</b>. Kies bij <b>Toestaan</b>: <b>Lijst</b>. Typ bij <b>Bron</b> de keuzes met een <b>puntkomma</b> ertussen, bv. <b>ja;nee</b>.</p>
+<p>Staan de keuzes al ergens in cellen? Dan kan je als bron ook dat <b>bereik</b> selecteren, bv. K6:N6.</p>`,
+        widget: { type: 'dvSim', rounds: [
+          { label: 'ik … (worden, tegenwoordige tijd)', ask: 'Maak in de cel een keuzelijst met de keuzes <b>word, wordt, werd</b> en <b>worden</b>.', goal: { type: 'list', items: ['word', 'wordt', 'werd', 'worden'] }, use: { pick: 'word' } }
+        ] } },
+      { id: 'l2', title: 'Alleen goede antwoorden toelaten',
+        body: `<p>Bij een rekenvraag wil je alleen <b>getallen</b> toelaten. In Gegevensvalidatie kies je bij Toestaan: <b>Geheel getal</b>, en daarna een minimum en een maximum.</p>
+<p>Op het tabblad <b>Foutmelding</b> typ je wat Excel moet zeggen als iemand iets anders typt, bv. "Typ een getal tussen 0 en 100."</p>`,
+        widget: { type: 'dvSim', rounds: [
+          { label: '6 x 7 =', ask: 'Laat in de cel alleen <b>gehele getallen tussen 0 en 100</b> toe, met een eigen foutmelding.', goal: { type: 'whole', min: 0, max: 100 }, use: { bad: 150 } }
+        ] } },
+      { id: 'l3', title: 'Kleuren die reageren',
+        body: `<p>Met <b>voorwaardelijke opmaak</b> kleurt Excel een cel <b>vanzelf</b>, afhankelijk van wat erin staat.</p>
+<p>Selecteer de cellen. Klik op het tabblad Start op <b>Voorwaardelijke opmaak</b> → <b>Markeringsregels voor cellen</b> en kies bv. <b>Kleiner dan</b>. Typ de waarde en kies een kleur.</p>`,
+        widget: { type: 'cfSim', rounds: [
+          { head: 'Punten', values: [8, 3, 10, 5, 9, 4], ask: 'Kleur alle punten <b>kleiner dan 5</b> met een <b>lichtrode</b> opvulling.', goal: v => v < 5 ? 'rood' : null }
+        ] } },
+      { id: 'l4', title: 'Groen voor juist, rood voor jammer',
+        body: `<p>In je interactief werkblad kan Excel ook de feedback kleuren. Gebruik <b>Tekst die bevat…</b>: één regel voor "juist" (groen) en één regel voor "jammer" (rood).</p>
+<p>Je mag meerdere regels op dezelfde cellen zetten.</p>`,
+        widget: { type: 'cfSim', rounds: [
+          { head: 'Feedback', values: ['juist', 'jammer', 'vul in', 'juist', 'jammer', 'juist'], ask: 'Laat <b>juist</b> groen en <b>jammer</b> rood kleuren. "vul in" blijft zonder kleur.', goal: v => v === 'juist' ? 'groen' : v === 'jammer' ? 'rood' : null }
+        ] } },
+      { id: 'l5', title: 'Kleuren in je rapport',
+        body: `<p>In je rapport zie je zo in één oogopslag waar het goed ging en waar je nog moet oefenen.</p>
+<p>Let op: 68% is voor Excel eigenlijk 0,68. Typ in de regel dus <b>50%</b> of <b>0,5</b>, niet 50.</p>
+<p>Extra: neem je eigen rapport uit stap 8 erbij en geef het ook kleuren!</p>`,
+        widget: { type: 'cfSim', rounds: [
+          { head: 'Procent', pct: true, values: [0.68, 0.45, 0.83, 0.92, 0.5, 0.38], ask: 'Kleur procenten <b>lager dan 50%</b> rood en procenten <b>hoger dan 80%</b> groen.', goal: v => v < 0.5 ? 'rood' : v > 0.8 ? 'groen' : null, okMsg: 'Juist! Rood en groen springen meteen in het oog.' }
+        ] } }
+    ],
+    startFile(seed, mode) {
+      const d = m10data(seed, mode), b = { bold: true }, W = d.W;
+      const ws = { A1: { v: 'Werkblad met keuzelijsten en kleuren', bold: true, size: 14 }, A3: { v: 'Vraag', ...b }, B3: { v: 'Oplossing', ...b }, C3: { v: 'Antwoord', ...b }, D3: { v: 'Feedback', ...b }, K3: { v: 'Keuzes', ...b } };
+      const qs = [[d.rk[0], d.rk[1]], [d.ww[0], d.ww[1]], [d.hs[0], d.hs[1]], ...d.ov];
+      qs.forEach((q, k) => {
+        const r = 4 + k;
+        ws['A' + r] = q[0]; ws['B' + r] = q[1];
+        ws['D' + r] = { f: `IF(C${r}="","vul in",IF(C${r}=B${r},"${W.ok}","${W.bad}"))` };
+      });
+      d.hs[2].forEach((x, k) => { ws[String.fromCharCode(75 + k) + '6'] = x; });
+      const rp = { A1: { v: 'Rapport dagelijks werk – ' + d.maand, bold: true, size: 14 }, A3: { v: 'Vak', ...b }, B3: { v: 'Score', ...b }, C3: { v: 'Maximum', ...b }, D3: { v: 'Procent', ...b }, A10: { v: 'Totaal', ...b } };
+      d.rap.forEach((x, k) => { const r = 4 + k; rp['A' + r] = x.n; rp['B' + r] = x.s; rp['C' + r] = x.max; rp['D' + r] = { f: `B${r}/C${r}`, fmt: '0%' }; });
+      rp.B10 = { f: 'SUM(B4:B9)' }; rp.C10 = { f: 'SUM(C4:C9)' }; rp.D10 = { f: 'B10/C10', fmt: '0%' };
+      return { name: mode === 'test' ? 'Test10_kleuren.xlsx' : 'Module10_kleuren.xlsx', spec: { sheets: [
+        { name: 'Werkblad', cells: ws, colWidths: { A: 36, B: 12, C: 14, D: 12, K: 11, L: 11, M: 11, N: 11 } },
+        { name: 'Rapport', cells: rp, colWidths: { A: 14, B: 9, C: 10, D: 10 } }] } };
+    },
+    gen(seed, mode) {
+      const d = m10data(seed, mode), W = d.W;
+      const items = d.ww[2];
+      const sheetOf = (wb, n) => wb.sheet(n) || wb.sheets[n === 'Rapport' ? 1 : 0];
+      const dvList = (sheet, a, want, needRange) => {
+        const dvs = sheet.dvAt(a);
+        if (!dvs.length) {
+          const elders = sheet.dataValidations.filter(x => x.type === 'list').map(x => x.sqref);
+          return no(elders.length ? `Je keuzelijst staat op ${[...new Set(elders)].join(', ')}, niet op ${a}.` : `${a} heeft nog geen keuzelijst. Gebruik Gegevens → Gegevensvalidatie → Lijst.`);
+        }
+        const dv = dvs[dvs.length - 1];
+        if (dv.type !== 'list') return no(`Bij ${a} koos je bij Toestaan niet "Lijst".`);
+        const got = (sheet.dvListItems(dv) || []).map(x => norm(x));
+        if (got.length === 1 && want.length > 1 && /[ ,]/.test(got[0])) return no(`Je keuzelijst heeft maar één keuze: "${got[0]}". Zet een puntkomma tussen de keuzes.`);
+        const w = want.map(norm), miss = w.filter(x => !got.includes(x)), extra = got.filter(x => !w.includes(x));
+        if (needRange && !sheet.dvIsRange(dv)) return no(`Gebruik als bron het bereik (de cellen ${needRange}), niet losse woorden. Klik in het vak Bron en selecteer de cellen.`);
+        if (miss.length) return no(`In de keuzelijst van ${a} ontbreekt nog: ${miss.join(', ')}.`);
+        if (extra.length) return no(`In de keuzelijst van ${a} staat iets wat er niet bij hoort: ${extra.join(', ')}.`);
+        return ok();
+      };
+      const colorTask = (sheetName, range, tests) => ({ wb }) => {
+        const sh = sheetOf(wb, sheetName);
+        const cells = []; eachCell(range, a => cells.push(a));
+        if (!sh.conditionalFormats.length) return no(`Er staat nog geen voorwaardelijke opmaak op ${range}${sheetName === 'Rapport' ? ' (blad Rapport)' : ''}.`);
+        const notCovered = cells.filter(a => !sh.cfAt(a).length);
+        if (notCovered.length === cells.length) return no(`Je regel staat op ${[...new Set(sh.conditionalFormats.map(c => c.sqref))].join(', ')}. Ze moet op ${range} staan.`);
+        if (notCovered.length) return no(`Je regel geldt nog niet voor ${list(notCovered.slice(0, 3))}. Selecteer ${range} helemaal.`);
+        if (tests.some(t => typeof t.v === 'number') && cells.some(a => sh.cfAt(a).some(r => r.type === 'cellIs' && r.formulas.some(f => numOf(f) != null && numOf(f) >= 1)))) return no('Je procenten zijn eigenlijk getallen tussen 0 en 1. Typ in de regel 50% of 0,5, niet 50.');
+        for (const t of tests) {
+          for (const a of cells) {
+            const st = sh.cfStyle(a, t.v);
+            const cols = [...colorNames(st.fill), ...colorNames(st.font)];
+            const shown = typeof t.v === 'number' ? pctTxt(t.v) : `"${t.v}"`;
+            if (t.want && !cols.includes(t.want)) {
+              if (!cols.length) {
+                return no(`Bij ${shown} krijgt ${a} nog geen kleur. Het moet ${t.want} worden.`);
+              }
+              return no(`Bij ${shown} wordt ${a} ${cols[0]}. Het moet ${t.want} worden.`);
+            }
+            if (t.not && cols.includes(t.not)) return no(`Bij ${shown} wordt ${a} ook ${t.not}. Dat mag niet: kijk je regel na (${typeof t.v === 'number' ? 'kleiner dan of groter dan?' : 'welke tekst?'}).`);
+          }
+        }
+        return ok();
+      };
+      return { startFile: true, tasks: [
+        { id: 't1', text: `Maak in <span class="addr">C5</span> een <b>keuzelijst</b> met de keuzes ${items.map(x => `<b>${x}</b>`).join(', ')}.`,
+          hints: ['Tabblad Gegevens → Gegevensvalidatie → Toestaan: Lijst.', `Typ bij Bron: ${items.join(';')}`],
+          check: ({ wb }) => dvList(sheetOf(wb, 'Werkblad'), 'C5', items, null) },
+        { id: 't2', text: `Maak in <span class="addr">C6</span> een keuzelijst met als bron het <b>bereik K6:N6</b>.`,
+          hints: ['Ook hier: Gegevensvalidatie → Lijst.', 'Klik in het vak Bron en selecteer met de muis de cellen K6 tot N6.'],
+          check: ({ wb }) => dvList(sheetOf(wb, 'Werkblad'), 'C6', d.hs[2], 'K6:N6') },
+        { id: 't3', text: `Laat in <span class="addr">C4</span> alleen <b>gehele getallen tussen 0 en 1000</b> toe, met een <b>eigen foutmelding</b>.`,
+          hints: ['Gegevensvalidatie → Toestaan: Geheel getal, tussen 0 en 1000.', 'Typ op het tabblad Foutmelding een bericht, bv. "Typ een getal."'],
+          check: ({ wb }) => {
+            const sh = sheetOf(wb, 'Werkblad'), dv = sh.dvAt('C4')[0];
+            if (!dv) return no('C4 heeft nog geen gegevensvalidatie.');
+            if (dv.type === 'decimal') return no('Kies Geheel getal in plaats van Decimaal: er horen geen kommagetallen bij deze vraag.');
+            if (dv.type !== 'whole') return no('Kies bij Toestaan: Geheel getal.');
+            if (dv.operator !== 'between') return no('Kies bij Gegevens: tussen.');
+            if (numOf(dv.formula1) !== 0 || numOf(dv.formula2) !== 1000) return no(`Het minimum moet 0 zijn en het maximum 1000. Nu is het ${dv.formula1 || '?'} en ${dv.formula2 || '?'}.`);
+            if (!dv.showErrorMessage || !(dv.error || '').trim()) return no('Typ op het tabblad Foutmelding een eigen foutbericht.');
+            return ok();
+          } },
+        { id: 't4', text: `Laat de feedback in <span class="addr">D4:D9</span> <b>groen</b> kleuren als er <b>"${W.ok}"</b> staat.`,
+          hints: ['Selecteer D4:D9. Start → Voorwaardelijke opmaak → Markeringsregels voor cellen.', `Kies "Tekst die bevat…", typ ${W.ok} en kies "Groene opvulling met donkergroene tekst".`],
+          check: colorTask('Werkblad', 'D4:D9', [{ v: W.ok, want: 'groen' }, { v: W.bad, not: 'groen' }, { v: 'vul in', not: 'groen' }]) },
+        { id: 't5', text: `Laat de feedback in <span class="addr">D4:D9</span> <b>rood</b> kleuren als er <b>"${W.bad}"</b> staat.`,
+          hints: ['Een tweede regel op dezelfde cellen.', `"Tekst die bevat…", typ ${W.bad} en kies "Lichtrode opvulling met donkerrode tekst".`],
+          check: colorTask('Werkblad', 'D4:D9', [{ v: W.bad, want: 'rood' }, { v: W.ok, not: 'rood' }, { v: 'vul in', not: 'rood' }]) },
+        { id: 't6', text: `Ga naar het blad <b>Rapport</b>. Kleur de procenten in <span class="addr">D4:D9</span> die <b>lager dan ${pctTxt(d.lo)}</b> zijn <b>rood</b>.`,
+          hints: ['Selecteer D4:D9 op het blad Rapport. Markeringsregels voor cellen → Kleiner dan.', `Typ ${pctTxt(d.lo)} (of ${nlNum(d.lo)}) en kies de lichtrode opvulling.`],
+          check: colorTask('Rapport', 'D4:D9', [{ v: d.lo - 0.05, want: 'rood' }, { v: d.lo + 0.05, not: 'rood' }]) },
+        { id: 't7', text: `Kleur op het blad Rapport de procenten <b>hoger dan ${pctTxt(d.hi)}</b> <b>groen</b>.`,
+          hints: ['Een tweede regel op D4:D9: Groter dan.', `Typ ${pctTxt(d.hi)} (of ${nlNum(d.hi)}) en kies de groene opvulling.`],
+          check: colorTask('Rapport', 'D4:D9', [{ v: d.hi + 0.05, want: 'groen' }, { v: d.hi - 0.05, not: 'groen' }, { v: d.lo - 0.05, not: 'groen' }]) },
+        { id: 't8', text: `Test je werkblad: beantwoord de vragen in <span class="addr">C4</span>, <span class="addr">C5</span> en <span class="addr">C6</span> juist. Gebruik de keuzelijsten. Wordt de feedback groen?`,
+          hints: ['Klik op het pijltje naast C5 en C6.', 'De oplossing staat in kolom B.'],
+          check: ({ wb }) => {
+            const sh = sheetOf(wb, 'Werkblad');
+            for (const r of [4, 5, 6]) {
+              const v = sh.value('C' + r);
+              if (v == null || String(v).trim() === '') return no(`C${r} is nog leeg.`);
+              if (norm(showV(sh.calc('D' + r))) !== norm(W.ok)) return no(`In C${r} staat "${showV(v)}", maar dat is niet het juiste antwoord.`);
+            }
+            return ok();
+          } }
+      ] };
+    }
+  };
+
+  const MODULES = [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10];
 
   /* Volgende modules (nog te bouwen) – getoond als vooruitblik. */
   const SOON = [
-    { nr: 10, title: 'Keuzelijsten en kleuren die reageren', short: 'Gegevensvalidatie en voorwaardelijke opmaak. Je rapport krijgt kleuren.' },
     { nr: 11, title: 'Klaar voor een gebruiker', short: 'Score tellen, afbeeldingen, blad beveiligen.' },
     { nr: 12, title: 'Project: mijn interactief werkblad', short: 'Je maakt een werkblad voor je klas of voor een andere klas.', project: true }
   ];
