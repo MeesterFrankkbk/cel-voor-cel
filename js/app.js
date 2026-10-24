@@ -449,9 +449,10 @@
       const restart = h('button', { class: 'btn small', onclick: () => startRound() }, '↺ Opnieuw');
       const ctrlNote = h('span', { class: 'small muted' });
       let i = 0, R, vals, sel, prev, lastFill, busy = false, ctrlDown = false;
-      let table, frame, handle, optsBtn, optsMenu, nb, wrap;
+      let table, frame, handle, optsBtn, optsMenu, nb, wrap, fxv = null;
       const A = (c, r) => COLS[c] + r;
-      const show = v => v == null ? '' : (typeof v === 'number' ? String(v).replace('.', ',') : v);
+      const F = window.CvcFormula;
+      const show = v => F.display(v, 'nl');
       const expected = () => {
         const e = Object.assign({}, R.cells);
         if (R.goal) Object.assign(e, R.goal);
@@ -477,14 +478,15 @@
         optsBtn = h('button', { class: 'fill-opts', hidden: true, title: 'Opvulopties', onclick: () => { optsMenu.hidden = !optsMenu.hidden; } }, '⊞ ▾');
         wrap = h('div', { class: 'fs-wrap' }, table, frame, handle, optsBtn, optsMenu);
         nb = h('b', {});
-        clear(box).append(h('div', { class: 'mini-namebox' }, 'Naamvak', nb), h('div', { class: 'grid-wrap' }, wrap));
+        fxv = R.formulaBar || w.formulaBar ? h('span', { class: 'fx-v' }) : null;
+        clear(box).append(h('div', { class: 'mini-namebox' }, 'Naamvak', nb, fxv ? h('span', { class: 'fx sim-fx' }, h('span', { class: 'fx-l' }, 'fx'), fxv) : null), h('div', { class: 'grid-wrap' }, wrap));
         table.addEventListener('pointerdown', e => {
           const td = e.target.closest('td'); if (!td || busy) return;
           e.preventDefault(); optsMenu.hidden = true;
           const c = +td.dataset.c, r = +td.dataset.r;
           sel = { c1: c, r1: r, c2: c, r2: r, ac: c, ar: r }; selecting = true; paint();
         });
-        handle.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (!sel || busy) return; filling = true; optsMenu.hidden = true; });
+        handle.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (!sel || busy || i >= w.rounds.length) return; filling = true; optsMenu.hidden = true; });
       }
       let selecting = false, filling = false;
       const tdAt = e => { const el = document.elementFromPoint(e.clientX, e.clientY); const td = el && el.closest && el.closest('td'); return td && table.contains(td) ? td : null; };
@@ -519,17 +521,29 @@
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
 
+      const isF = v => typeof v === 'string' && v.startsWith('=');
+      // reeks met formules: Excel kopieert het patroon en schuift de adressen mee
+      const fillLine = (seeds, n, ctrl, horiz) => seeds.some(isF)
+        ? Array.from({ length: n }, (_, t) => { const k = t % seeds.length, off = seeds.length + t - k, v = seeds[k]; return isF(v) ? F.shift(v, horiz ? 0 : off, horiz ? off : 0) : v; })
+        : fillSeries(seeds, n, ctrl);
       function compute(dir, n, ctrl) {
         const out = {};
         if (dir === 'down') for (let c = sel.c1; c <= sel.c2; c++) {
           const seeds = []; for (let r = sel.r1; r <= sel.r2; r++) seeds.push(vals[A(c, r)] ?? null);
-          fillSeries(seeds, n, ctrl).forEach((v, k) => { if (sel.r2 + 1 + k <= R.rows) out[A(c, sel.r2 + 1 + k)] = v; });
+          fillLine(seeds, n, ctrl, false).forEach((v, k) => { if (sel.r2 + 1 + k <= R.rows) out[A(c, sel.r2 + 1 + k)] = v; });
         } else for (let r = sel.r1; r <= sel.r2; r++) {
           const seeds = []; for (let c = sel.c1; c <= sel.c2; c++) seeds.push(vals[A(c, r)] ?? null);
-          fillSeries(seeds, n, ctrl).forEach((v, k) => { if (sel.c2 + 1 + k < R.cols) out[A(sel.c2 + 1 + k, r)] = v; });
+          fillLine(seeds, n, ctrl, true).forEach((v, k) => { if (sel.c2 + 1 + k < R.cols) out[A(sel.c2 + 1 + k, r)] = v; });
         }
         return out;
       }
+      // uitrekenen van formules in de simulator
+      const calc = (a, seen) => {
+        const v = vals[a];
+        if (!isF(v)) return v ?? null;
+        seen = seen || new Set(); if (seen.has(a)) return new F.Err('#REF!'); seen.add(a);
+        return F.evaluate(v, { locale: 'nl', get: x => calc(x, new Set(seen)) });
+      };
       function apply(dir, n, ctrl) {
         lastFill = { dir, n, before: Object.assign({}, vals), sel: Object.assign({}, sel) };
         Object.entries(compute(dir, n, ctrl)).forEach(([k, v]) => { if (v == null) delete vals[k]; else vals[k] = v; });
@@ -545,16 +559,19 @@
       function paint() {
         table.querySelectorAll('td').forEach(td => {
           const c = +td.dataset.c, r = +td.dataset.r, a = A(c, r);
-          td.textContent = show(vals[a]);
-          td.style.textAlign = typeof vals[a] === 'number' ? 'right' : 'left';
+          const cv = calc(a);
+          td.textContent = show(cv);
+          td.style.textAlign = typeof cv === 'number' ? 'right' : (F.isErr(cv) ? 'center' : 'left');
+          td.classList.toggle('err', F.isErr(cv));
           td.style.paddingInline = '5px';
           const inSel = sel && c >= sel.c1 && c <= sel.c2 && r >= sel.r1 && r <= sel.r2;
           td.classList.toggle('insel', !!inSel && !(sel.c1 === sel.c2 && sel.r1 === sel.r2));
           const inPrev = prev && sel && (prev.dir === 'down' ? c >= sel.c1 && c <= sel.c2 && r > sel.r2 && r <= sel.r2 + prev.n : r >= sel.r1 && r <= sel.r2 && c > sel.c2 && c <= sel.c2 + prev.n);
           td.classList.toggle('fillprev', !!inPrev);
         });
-        if (!sel) { frame.hidden = handle.hidden = true; nb.textContent = ''; return; }
+        if (!sel) { frame.hidden = handle.hidden = true; nb.textContent = ''; if (fxv) fxv.textContent = ''; return; }
         if (!filling) nb.textContent = A(sel.c1, sel.r1) + (sel.c1 !== sel.c2 || sel.r1 !== sel.r2 ? ':' + A(sel.c2, sel.r2) : '');
+        if (fxv) { const raw = vals[A(sel.c1, sel.r1)]; fxv.textContent = raw == null ? '' : (typeof raw === 'number' ? show(raw) : raw); }
         const tl = table.querySelector(`td[data-c="${sel.c1}"][data-r="${sel.r1}"]`), br = table.querySelector(`td[data-c="${sel.c2}"][data-r="${sel.r2}"]`);
         const wr = wrap.getBoundingClientRect(), a = tl.getBoundingClientRect(), b = br.getBoundingClientRect();
         Object.assign(frame.style, { left: (a.left - wr.left - 1) + 'px', top: (a.top - wr.top - 1) + 'px', width: (b.right - a.left + 1) + 'px', height: (b.bottom - a.top + 1) + 'px' });
@@ -570,7 +587,7 @@
         const keys = new Set([...Object.keys(exp), ...Object.keys(vals)]);
         let wrong = 0, missing = 0, extra = 0;
         keys.forEach(k => {
-          const e = exp[k], v = vals[k];
+          const e = exp[k], v = isF(exp[k]) ? vals[k] : calc(k);
           if (e == null && v != null && v !== '') extra++;
           else if (e != null && (v == null || v === '')) missing++;
           else if (e != null && !same(v, e)) wrong++;
@@ -578,7 +595,13 @@
         const seeds = lastFill ? (() => { const s = lastFill.sel; const arr = []; for (let r = s.r1; r <= s.r2; r++) for (let c = s.c1; c <= s.c2; c++) arr.push(lastFill.before[A(c, r)]); return arr; })() : [];
         if (!wrong && !missing && !extra) {
           good(ui.fb, 'Juist! Excel deed het werk voor jou.'); busy = true; i++;
-          setTimeout(() => { busy = false; if (i >= w.rounds.length) { clear(box).append(h('p', { class: 'fb ok' }, 'Super! Je kan de vulgreep gebruiken.')); restart.hidden = true; ui.ask.textContent = ''; ui.cnt.textContent = ''; onDone(); } else startRound(); }, 1100);
+          setTimeout(() => {
+            busy = false;
+            if (i >= w.rounds.length) {
+              if (w.keep) { restart.hidden = true; ui.cnt.textContent = ''; ui.ask.innerHTML = w.keep; good(ui.fb, w.doneMsg || 'Juist!'); onDone(); return; }
+              clear(box).append(h('p', { class: 'fb ok' }, w.doneMsg || 'Super! Je kan de vulgreep gebruiken.')); restart.hidden = true; ui.ask.textContent = ''; ui.cnt.textContent = ''; onDone();
+            } else startRound();
+          }, 1100);
         } else if (wrong) {
           const nums = seeds.filter(v => typeof v === 'number');
           if (R.options && nums.length === 1 && seeds.length === 1 && !ctrl) bad(ui.fb, 'Excel kopieerde het getal. Klik op het knopje Opvulopties ⊞ en kies "Reeks doorvoeren", of klik op Opnieuw en hou Ctrl ingedrukt.', table);
@@ -596,6 +619,97 @@
       }
       startRound();
       return h('div', { class: 'q' }, ui.cnt, ui.ask, h('p', { class: 'small muted' }, 'Selecteer eerst de cel(len). Sleep dan het groene vierkantje rechtsonder.'), box, h('div', { class: 'btn-row' }, restart, ctrlNote), ui.fb);
+    },
+    sheetSim(w, onDone) {
+      // Een klein rekenblad: cel aanklikken, typen in de formulebalk, Enter. Formules rekenen mee.
+      const F = window.CvcFormula;
+      const ui = roundsUI(w.rounds.length);
+      const ROWS = w.rows || 6, NC = w.cols || 4;
+      let i = 0, vals = {}, cur = 'A1', R;
+      const isF = v => typeof v === 'string' && v.startsWith('=');
+      const memo = {};
+      const calc = (a, seen) => {
+        const v = vals[a];
+        if (!isF(v)) return v ?? null;
+        seen = seen || new Set(); if (seen.has(a)) return new F.Err('#REF!'); seen.add(a);
+        return F.evaluate(v, { locale: 'nl', get: x => calc(x, new Set(seen)) });
+      };
+      const raw = a => { const v = vals[a]; return v == null ? '' : typeof v === 'number' ? F.display(v, 'nl') : String(v); };
+      const nb = h('b', {}, 'A1');
+      const fx = h('input', { class: 'fx-in', id: 'fx-' + Math.random().toString(36).slice(2, 7), autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Formulebalk' });
+      const enter = h('button', { class: 'btn small', title: 'Bevestigen (Enter)' }, '↵ Enter');
+      const table = h('table', { class: 'mini sheet-sim' });
+      const head = h('tr', {}, h('th', { class: 'corner' }));
+      for (let c = 0; c < NC; c++) head.append(h('th', { style: w.widths && w.widths[c] ? `min-width:${w.widths[c]}px` : null }, COLS[c]));
+      table.append(h('thead', {}, head));
+      const tb = h('tbody');
+      for (let r = 1; r <= ROWS; r++) { const tr = h('tr', {}, h('th', {}, r)); for (let c = 0; c < NC; c++) tr.append(h('td', { class: 'click', 'data-a': COLS[c] + r })); tb.append(tr); }
+      table.append(tb);
+      const paint = () => {
+        const refs = isF(fx.value) && document.activeElement === fx ? new Set((F.info(fx.value, 'nl').cells) || []) : new Set();
+        table.querySelectorAll('td').forEach(td => {
+          const a = td.dataset.a, v = calc(a);
+          td.textContent = F.display(v, 'nl');
+          td.style.textAlign = typeof v === 'number' ? 'right' : F.isErr(v) ? 'center' : 'left';
+          td.style.paddingInline = '6px';
+          td.classList.toggle('err', F.isErr(v));
+          td.classList.toggle('cur', a === cur);
+          td.classList.toggle('refhl', refs.has(a));
+          td.classList.toggle('isformula', isF(vals[a]));
+        });
+        nb.textContent = cur;
+      };
+      const select = a => { cur = a; fx.value = raw(a); paint(); };
+      table.addEventListener('pointerdown', e => {
+        const td = e.target.closest('td'); if (!td) return;
+        // tijdens het typen van een formule: adres invoegen, zoals in Excel
+        if (document.activeElement === fx && isF(fx.value) && td.dataset.a !== cur && /[=+\-*/^(;:&<>]$/.test(fx.value.slice(0, fx.selectionStart).trim())) {
+          e.preventDefault();
+          const p = fx.selectionStart; fx.value = fx.value.slice(0, p) + td.dataset.a + fx.value.slice(fx.selectionEnd);
+          fx.setSelectionRange(p + td.dataset.a.length, p + td.dataset.a.length); paint(); return;
+        }
+        e.preventDefault(); select(td.dataset.a); fx.focus();
+      });
+      fx.addEventListener('input', paint);
+      fx.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } else if (e.key === 'Escape') { fx.value = raw(cur); paint(); } });
+      enter.addEventListener('click', commit);
+      function commit() {
+        const t = fx.value.trim(), a = cur;
+        if (t === '') delete vals[a];
+        else if (t.startsWith('=')) vals[a] = t.replace(/\s+/g, '');
+        else if (/^-?\d+(,\d+)?$/.test(t)) vals[a] = parseFloat(t.replace(',', '.'));
+        else if (/^-?\d+(,\d+)?%$/.test(t)) vals[a] = parseFloat(t.replace(',', '.')) / 100;
+        else vals[a] = t;
+        const p = /([A-Z])(\d+)/.exec(a); const below = p[1] + Math.min(ROWS, +p[2] + 1);
+        select(below === a ? a : below);
+        check(a);
+      }
+      const api = {
+        val: a => calc(a), raw: a => vals[a], isFormula: a => isF(vals[a]),
+        info: a => isF(vals[a]) ? F.info(vals[a], 'nl') : null, num: a => { const v = calc(a); return typeof v === 'number' ? v : null; },
+        isErr: a => F.isErr(calc(a)), show: a => F.display(calc(a), 'nl')
+      };
+      function check(changed) {
+        if (!R) return;
+        let r;
+        try { r = R.check(api, changed); } catch (e) { r = null; }
+        if (!r) { ui.fb.className = 'fb'; ui.fb.textContent = ''; return; }
+        if (r.ok) {
+          good(ui.fb, r.msg || 'Juist!'); const was = i; i++;
+          setTimeout(() => { if (i !== was + 1) return; if (i >= w.rounds.length) { ui.ask.textContent = ''; ui.cnt.textContent = ''; good(ui.fb, w.doneMsg || 'Klaar! Je rekent als een echte Excel-kenner.'); onDone(); } else start(); }, 1300);
+        } else bad(ui.fb, r.msg, table);
+      }
+      function start() {
+        R = w.rounds[i];
+        if (i === 0 || R.cells) { vals = {}; Object.assign(vals, w.cells || {}, R.cells || {}); }
+        ui.set(i, R.ask); ui.fb.textContent = ''; ui.fb.className = 'fb';
+        select(R.select || 'A1');
+      }
+      start();
+      return h('div', { class: 'q' }, ui.cnt, ui.ask,
+        h('p', { class: 'small muted' }, 'Klik op een cel en typ bovenaan in de formulebalk. Druk op Enter om te bevestigen.'),
+        h('div', { class: 'fxrow' }, h('span', { class: 'mini-namebox' }, nb), h('span', { class: 'fx-l' }, 'fx'), fx, enter),
+        h('div', { class: 'grid-wrap' }, table), ui.fb);
     },
     numSim(w, onDone) {
       const nl = window.CvcModules.nlNum;

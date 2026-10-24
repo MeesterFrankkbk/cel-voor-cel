@@ -833,12 +833,350 @@
     }
   };
 
-  const MODULES = [m1, m2, m3, m4, m5];
+  // ======================================================================
+  // Formules controleren (stap 6 en verder)
+  // ======================================================================
+  const FX = (typeof module !== 'undefined' && module.exports) ? require('./formula.js') : root.CvcFormula;
+  const showV = v => FX.display(v, 'nl');
+  const dutch = f => FX.toDutch(f);
+  /* Controleert een formulecel. opt: { expect, refs: [...], label, funcs: [...] } */
+  function checkFormula(sheet, a, opt) {
+    const c = sheet.cell(a), f = sheet.formula(a);
+    const raw = c ? c.v : null;
+    if (!f) {
+      if (raw == null || String(raw).trim() === '') return no(`Cel ${a} is nog leeg.`);
+      if (typeof raw === 'string' && /^\s*=/.test(raw)) return no(`Excel ziet je formule in ${a} als tekst. Maak de cel leeg, zet de notatie op Standaard en typ de formule opnieuw.`);
+      if (typeof raw === 'string' && /[A-Za-z]+\d+\s*[-+*/x×:]\s*[A-Za-z]+\d+/.test(raw)) return no(`In ${a} staat "${raw}" als gewone tekst: je vergat het =-teken. Een formule begint altijd met =.`);
+      if (isNum(raw) && opt.expect != null && Math.abs(raw - opt.expect) < 1e-6) return no(`In ${a} staat het getal ${showV(raw)}. Dat klopt, maar het is geen formule. Laat Excel rekenen: typ een formule die met = begint.`);
+      return no(`In ${a} staat ${showV(raw)}, geen formule. Een formule begint met =.`);
+    }
+    const inf = FX.info(f, 'en'), v = sheet.calc(a);
+    if (/[A-Za-z]+\$?\d+\s*[xX×]\s*\$?[A-Za-z]/.test(f)) return no('Vermenigvuldigen doe je met * (sterretje), niet met x.');
+    if (FX.isErr(v)) {
+      const bron = [...new Set(inf.cells)].find(x => x !== a && FX.isErr(sheet.calc(x)));
+      if (bron) return no(`${a} toont een foutmelding omdat ${bron} zelf een fout bevat. Los eerst ${bron} op.`);
+      if (v.error === '#DIV/0!') return no(`${a} toont #DEEL/0!: je formule deelt door 0 of door een lege cel. Kijk welke cel je achter de / zette.`);
+      if (v.error === '#NAME?') {
+        const onbekend = inf.funcs.filter(x => !FX.EN_NL[x]);
+        return no(onbekend.length ? `${a} toont #NAAM?: Excel kent de functie ${onbekend[0]} niet. Controleer de schrijfwijze.` : `${a} toont #NAAM?: Excel begrijpt een woord in je formule niet. Controleer de schrijfwijze.`);
+      }
+      return no(`${a} toont een foutmelding (${showV(v)}). Kijk je formule na: ${dutch(f)}`);
+    }
+    if (!inf.hasRef) return no(`Je formule (${dutch(f)}) rekent met getallen die je zelf typte. Gebruik de celadressen, dan rekent Excel vanzelf opnieuw als er iets verandert.`);
+    if (opt.funcs && !opt.funcs.some(fn => inf.funcs.includes(fn))) return opt.funcMsg ? no(opt.funcMsg) : no(`Gebruik de functie ${opt.funcs.map(x => FX.EN_NL[x] || x).join(' of ')}.`);
+    if (opt.refs) {
+      const missing = opt.refs.filter(r => !inf.cells.includes(r));
+      if (missing.length) {
+        const used = [...new Set(inf.cells)].filter(x => !opt.refs.includes(x));
+        if (opt.allRefsMsg) return no(opt.allRefsMsg(missing, used));
+        return no(`Je formule (${dutch(f)}) gebruikt ${used.length ? list(used) : 'andere cellen'}${missing.length ? `, maar niet ${list(missing)}` : ''}.`);
+      }
+    }
+    if (opt.expect != null && !(isNum(v) && Math.abs(v - opt.expect) < 1e-6)) {
+      if (opt.wrongMsg) { const m = opt.wrongMsg(v, f); if (m) return no(m); }
+      return no(`Je formule geeft ${showV(v)}, maar het moet ${showV(opt.expect)} zijn. Kijk je formule na: ${dutch(f)}`);
+    }
+    return ok();
+  }
+
+  // ======================================================================
+  // MODULE 6 – Je eerste formules
+  // ======================================================================
+  const ARTIKELS = [['Chips', 0.85], ['Frisdrank', 1.29], ['Water', 0.65], ['Koekjes', 1.49], ['Bekertjes', 1.15], ['Servetten', 0.99], ['Snoep', 2.35], ['Fruitsap', 1.79], ['Popcorn', 1.25], ['Slingers', 3.5], ['Ballonnen', 2.75], ['Pistolets', 0.45]];
+  function m6data(seed, mode) {
+    const r = rng(seed + '|m6|' + mode);
+    const items = r.shuffle(ARTIKELS).slice(0, 6).map(([n, p]) => ({ n, p, a: r.int(2, 12) }));
+    const total = round9(items.reduce((s, x) => s + x.p * x.a, 0));
+    const budget = Math.ceil(total / 5) * 5 + 5 * r.int(1, 3);
+    const kids = r.int(18, 26);
+    const kids2 = kids + r.pick([-3, -2, 2, 3, 4]);
+    return { items, total, budget, kids, kids2, titel: mode === 'test' ? 'Inkopen voor de sportdag' : 'Inkopen voor het klasfeest' };
+  }
+
+  const m6 = {
+    id: 'm6', nr: 6,
+    title: 'Je eerste formules',
+    short: 'Je laat Excel rekenen met formules en celadressen. Verander je een getal, dan rekent Excel vanzelf opnieuw.',
+    skills: ['het =-teken', '+ − * /', 'celadressen in formules', 'formules doortrekken', 'voorrang en haakjes', 'foutmeldingen'],
+    lessons: [
+      { id: 'l1', title: 'Excel als rekenmachine',
+        body: `<p>Een <b>formule</b> begint altijd met een <b>=</b>. Daarna schrijf je de berekening. Excel toont in de cel de <b>uitkomst</b>; de formule zelf zie je in de formulebalk.</p>
+<p>Excel rekent met deze tekens: <span class="key">+</span> optellen, <span class="key">-</span> aftrekken, <span class="key">*</span> vermenigvuldigen (geen ×) en <span class="key">/</span> delen (geen :).</p>`,
+        widget: { type: 'sheetSim', rows: 4, cols: 3, rounds: [
+          { select: 'A1', ask: 'Klik op <span class="addr">A1</span> en typ <b>=6*7</b>. Druk op Enter.',
+            check: (s, ch) => ch !== 'A1' ? null : s.isFormula('A1') ? (s.num('A1') === 42 ? ok('Juist: 42. Excel deed de som voor jou.') : no(`Je formule geeft ${s.show('A1')}. Typ precies =6*7`)) : no('Je typte geen formule. Een formule begint met =.') },
+          { select: 'A2', ask: 'Bereken in <span class="addr">A2</span>: 125 gedeeld door 5.',
+            check: (s, ch) => ch !== 'A2' ? null : /:/.test(String(s.raw('A2'))) ? no('Delen doe je met / (schuine streep), niet met :.') : !s.isFormula('A2') ? no('Begin met =.') : s.num('A2') === 25 ? ok('Juist: 25.') : no(`Je formule geeft ${s.show('A2')}. Het moet 25 zijn.`) },
+          { select: 'A3', ask: 'Typ in <span class="addr">A3</span> eens <b>6*7</b>, maar <b>zonder</b> =. Wat zie je?',
+            check: (s, ch) => ch !== 'A3' ? null : s.isFormula('A3') ? no('Typ het nu eens zonder =.') : String(s.raw('A3')).replace(/\s/g, '') === '6*7' ? ok('Zie je? Zonder = is het gewone tekst. Excel rekent niet.') : no('Typ 6*7 zonder =.') }
+        ] } },
+      { id: 'l2', title: 'Rekenen met celadressen',
+        body: `<p>Je kan in een formule ook <b>celadressen</b> gebruiken: <b>=B1*B2</b> betekent "wat in B1 staat, maal wat in B2 staat".</p>
+<p>Dat is slim: verandert er een getal in B1 of B2, dan rekent Excel de uitkomst <b>vanzelf opnieuw</b>.</p>
+<p>Tip: je hoeft het adres niet te typen. Typ <b>=</b> en <b>klik</b> op de cel. Excel zet het adres in je formule.</p>`,
+        widget: { type: 'sheetSim', rows: 5, cols: 3, widths: [110, 70, 70], cells: { A1: 'Prijs', B1: 2.5, A2: 'Aantal', B2: 4, A3: 'Totaal', A5: 'Per persoon' }, rounds: [
+          { select: 'B3', ask: 'Bereken in <span class="addr">B3</span> het totaal: typ <b>=</b>, klik op B1, typ <b>*</b>, klik op B2 en druk op Enter.',
+            check: (s, ch) => {
+              if (ch !== 'B3') return null;
+              const inf = s.info('B3');
+              if (!inf) return no('Een formule begint met =.');
+              if (!inf.hasRef) return no('Je rekende met getallen. Gebruik de celadressen B1 en B2.');
+              if (!inf.cells.includes('B1') || !inf.cells.includes('B2')) return no('Gebruik B1 en B2 in je formule.');
+              return s.num('B3') === 10 ? ok('Juist: 10.') : no(`Je formule geeft ${s.show('B3')}. Het moet 10 zijn.`);
+            } },
+          { select: 'B2', ask: 'Er worden 6 stuks gekocht. Verander <span class="addr">B2</span> in <b>6</b>. Kijk wat er met B3 gebeurt!',
+            check: (s, ch) => ch !== 'B2' ? null : s.num('B2') !== 6 ? no('Typ 6 in B2.') : s.isFormula('B3') ? ok(`B3 rekende vanzelf opnieuw: ${s.show('B3')}. Daarom gebruik je celadressen!`) : no('B3 is geen formule meer. Typ eerst weer =B1*B2 in B3.') },
+          { select: 'B5', ask: 'Twee personen delen alles. Bereken in <span class="addr">B5</span> hoeveel iedereen betaalt: het totaal gedeeld door 2.',
+            check: (s, ch) => ch !== 'B5' ? null : !s.info('B5') ? no('Begin met =.') : !s.info('B5').cells.includes('B3') ? no('Gebruik het totaal uit B3 in je formule.') : s.num('B5') === s.num('B3') / 2 ? ok(`Juist: ${s.show('B5')}.`) : no(`Je formule geeft ${s.show('B5')}. Deel B3 door 2.`) }
+        ] } },
+      { id: 'l3', title: 'Formules doortrekken',
+        body: `<p>Moet je in elke rij dezelfde berekening maken? Typ de formule één keer en <b>trek ze door</b> met de vulgreep, net zoals een reeks.</p>
+<p>Excel past de adressen vanzelf aan: <b>=A2*B2</b> in rij 2 wordt <b>=A3*B3</b> in rij 3, <b>=A4*B4</b> in rij 4 …</p>
+<p>Klik daarna op een cel: in de formulebalk zie je welke formule Excel maakte.</p>`,
+        widget: { type: 'fillSim', formulaBar: true, keep: 'Klik nu op <span class="addr">C4</span> en op <span class="addr">C6</span>. Welke formule zie je in de formulebalk?', doneMsg: 'Juist! Excel trok de formule door en paste de adressen aan.', rounds: [
+          { rows: 6, cols: 3, cells: { A1: 'Aantal', B1: 'Prijs', C1: 'Totaal', A2: 3, B2: 2, C2: '=A2*B2', A3: 5, B3: 1.5, A4: 2, B4: 4, A5: 10, B5: 0.5, A6: 4, B6: 3 },
+            goal: { C3: 7.5, C4: 8, C5: 5, C6: 12 }, ask: 'In <span class="addr">C2</span> staat <b>=A2*B2</b>. Klik op C2 en sleep de vulgreep naar beneden tot <span class="addr">C6</span>.' }
+        ] } },
+      { id: 'l4', title: 'Wat doet Excel bij doortrekken?',
+        body: `<p>Excel onthoudt niet "B2", maar "de cel links van mij". Daarom schuiven de adressen mee als je een formule doortrekt.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'In C2 staat =A2*B2. Je trekt de formule door tot C5. Welke formule staat in C5?', options: ['=A5*B5', '=A2*B2', '=A5*B2'], correct: 0, explain: 'Je ging 3 rijen naar beneden, dus alle rijnummers gaan 3 omhoog.' },
+          { q: 'In C2 staat =A2+B2. Je trekt de formule naar rechts, naar D2. Wat staat er in D2?', options: ['=A2+B2', '=B2+C2', '=A3+B3'], correct: 1, explain: 'Eén kolom naar rechts: alle letters schuiven één plaats op.' },
+          { q: 'Waarom trek je een formule door?', options: ['Het is sneller en Excel past de adressen zelf aan', 'Anders werkt de formule niet', 'Dan wordt de tekst vet'], correct: 0, explain: 'Eén keer goed denken, Excel doet de rest.' }
+        ] } },
+      { id: 'l5', title: 'Voorrang en haakjes',
+        body: `<p>Excel rekent zoals in de wiskundeles: eerst <b>*</b> en <b>/</b>, dan pas <b>+</b> en <b>-</b>. Wil je iets eerst laten uitrekenen, zet het dan tussen <b>haakjes</b>.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Wat is de uitkomst van =2+3*4?', options: ['20', '14', '24'], correct: 1, explain: 'Eerst 3*4 = 12, dan 2+12 = 14.' },
+          { q: 'Wat is de uitkomst van =(2+3)*4?', options: ['20', '14', '11'], correct: 0, explain: 'Haakjes eerst: 2+3 = 5, dan 5*4 = 20.' },
+          { q: 'Je wil het gemiddelde van A1 en A2. Welke formule klopt?', options: ['=A1+A2/2', '=(A1+A2)/2', '=A1/2+A2'], correct: 1, explain: 'Eerst samen optellen (haakjes), dan delen door 2.' }
+        ] } },
+      { id: 'l6', title: 'Foutmeldingen',
+        body: `<p>Soms toont Excel een foutmelding in plaats van een uitkomst:</p>
+<p><b>#DEEL/0!</b> – je deelt door 0 of door een lege cel.<br><b>#NAAM?</b> – Excel begrijpt een woord in je formule niet (bv. een x in plaats van *).<br><b>#####</b> – geen fout: de kolom is te smal voor het getal. Maak de kolom breder.</p>`,
+        widget: { type: 'sheetSim', rows: 5, cols: 3, widths: [110, 70, 70], cells: { A1: 'Totaal', B1: 36, A2: 'Kinderen', A3: 'Per kind', B3: '=B1/B2' }, rounds: [
+          { select: 'B2', ask: 'B3 toont <b>#DEEL/0!</b> omdat B2 leeg is. Los het op: er zijn <b>9</b> kinderen.',
+            check: (s, ch) => ch !== 'B2' ? null : s.num('B3') === 4 ? ok('Opgelost! 36 gedeeld door 9 is 4.') : no('Typ 9 in B2.') },
+          { select: 'B5', ask: 'Typ in <span class="addr">B5</span> eens <b>=B1xB2</b> (met een x). Welke foutmelding zie je?',
+            check: (s, ch) => ch !== 'B5' ? null : s.isErr('B5') && s.show('B5') === '#NAAM?' ? ok('Juist: #NAAM?. Excel kent x niet als teken. Vermenigvuldigen doe je met *.') : no('Typ precies =B1xB2 in B5.') }
+        ] } }
+    ],
+    startFile(seed, mode) {
+      const d = m6data(seed, mode), b = { bold: true };
+      const cells = { A1: { v: d.titel, bold: true, size: 14 }, A3: { v: 'Artikel', ...b }, B3: { v: 'Prijs per stuk', ...b }, C3: { v: 'Aantal', ...b }, D3: { v: 'Totaal', ...b },
+        A11: { v: 'Totaal', ...b }, F3: { v: 'Budget', ...b }, G3: d.budget, F4: { v: 'Over', ...b }, F6: { v: 'Aantal leerlingen', ...b }, G6: d.kids, F7: { v: 'Per leerling', ...b } };
+      d.items.forEach((x, i) => { cells['A' + (4 + i)] = x.n; cells['B' + (4 + i)] = x.p; cells['C' + (4 + i)] = x.a; });
+      return { name: mode === 'test' ? 'Test6_formules.xlsx' : 'Module6_formules.xlsx', spec: { sheetName: 'Inkopen', cells, colWidths: { A: 14, B: 14, D: 11, F: 18 } } };
+    },
+    gen(seed, mode) {
+      const d = m6data(seed, mode), it = d.items;
+      const rowMsg = r => (missing, used) => `De formule in D${r} moet met rij ${r} rekenen (B${r} en C${r}), maar ze gebruikt ${list(used) || 'andere cellen'}.`;
+      return { startFile: true, tasks: [
+        { id: 't1', text: `Bereken in <span class="addr">D4</span> het totaal voor <b>${it[0].n.toLowerCase()}</b>: prijs per stuk × aantal. Gebruik een formule met de celadressen.`,
+          hints: ['Een formule begint met =. Vermenigvuldigen doe je met *.', 'Typ = , klik op B4, typ * , klik op C4 en druk op Enter.'],
+          check: ({ sheet }) => checkFormula(sheet, 'D4', { expect: round9(it[0].p * it[0].a), refs: ['B4', 'C4'] }) },
+        { id: 't2', text: `<b>Trek de formule</b> van D4 door tot <span class="addr">D9</span>.`,
+          hints: ['Je hoeft de formule niet opnieuw te typen.', 'Klik op D4 en sleep de vulgreep naar beneden tot D9.'],
+          check: ({ sheet }) => {
+            for (let k = 1; k < it.length; k++) {
+              const r = 4 + k, a = 'D' + r;
+              if (!sheet.formula(a) && isNum(sheet.value(a))) return no(`In ${a} staat een getal, geen formule. Trek de formule van D4 door met de vulgreep.`);
+              const res = checkFormula(sheet, a, { expect: round9(it[k].p * it[k].a), refs: ['B' + r, 'C' + r], allRefsMsg: rowMsg(r) });
+              if (!res.ok) return res;
+            }
+            return ok();
+          } },
+        { id: 't3', text: `Tel in <span class="addr">D11</span> alle totalen op, van D4 tot D9, met een formule.`,
+          hints: ['Je kan cellen optellen met +.', 'Typ =D4+D5+D6+D7+D8+D9 (of klik telkens op de cel) en druk op Enter.'],
+          check: ({ sheet }) => checkFormula(sheet, 'D11', { expect: d.total, refs: ['D4', 'D5', 'D6', 'D7', 'D8', 'D9'], allRefsMsg: miss => `Je formule telt ${list(miss)} nog niet mee.` }) },
+        { id: 't4', text: `Bereken in <span class="addr">G4</span> hoeveel geld er <b>overblijft</b> van het budget: budget min het totaal.`,
+          hints: ['Welke twee cellen heb je nodig? Het budget en het totaal.', 'Typ =G3-D11 en druk op Enter.'],
+          check: ({ sheet }) => {
+            const exp = numOf(sheet.calc('G3')) - numOf(sheet.calc('D11'));
+            return checkFormula(sheet, 'G4', { expect: round9(exp), refs: ['G3', 'D11'], wrongMsg: v => isNum(v) && Math.abs(v + exp) < 1e-6 ? 'Je uitkomst is negatief: je trok af in de verkeerde volgorde. Begin met het budget: =G3-D11.' : null });
+          } },
+        { id: 't5', text: `Bereken in <span class="addr">G7</span> hoeveel het kost <b>per leerling</b>: het totaal gedeeld door het aantal leerlingen.`,
+          hints: ['Delen doe je met /.', 'Typ =D11/G6 en druk op Enter.'],
+          check: ({ sheet }) => {
+            const exp = numOf(sheet.calc('D11')) / numOf(sheet.calc('G6'));
+            return checkFormula(sheet, 'G7', { expect: round9(exp), refs: ['D11', 'G6'], wrongMsg: v => isNum(v) && Math.abs(v - 1 / exp) < 1e-6 ? 'Je deelde omgekeerd. Eerst het totaal, dan delen door het aantal leerlingen: =D11/G6.' : null });
+          } },
+        { id: 't6', text: `Toon <span class="addr">G7</span> in <b>euro met 2 decimalen</b>.`,
+          hints: ['Dat leerde je in stap 5.', 'Klik op G7 en klik op de knop met het geldbiljet (€).'],
+          check: ({ sheet }) => { const i = sheet.numFmt('G7'); return i.kind === 'currency' && i.dec === 2 ? ok() : i.kind === 'currency' ? no(`G7 is in euro, maar met ${i.dec} ${i.dec === 1 ? 'decimaal' : 'decimalen'}. Het moeten er 2 zijn.`) : no('G7 is nog niet in euro.'); } },
+        { id: 't7', text: `Er komen <b>${d.kids2}</b> leerlingen in plaats van ${d.kids}. Verander het getal in <span class="addr">G6</span> en kijk wat er gebeurt met G7.`,
+          hints: ['Je hoeft G7 niet te veranderen.', `Klik op G6, typ ${d.kids2} en druk op Enter. G7 rekent vanzelf opnieuw.`],
+          check: ({ sheet }) => {
+            if (numOf(sheet.value('G6')) !== d.kids2) return no(`In G6 moet ${d.kids2} staan.`);
+            if (!sheet.formula('G7')) return no('G7 is geen formule meer. Typ opnieuw =D11/G6.');
+            return ok();
+          } }
+      ] };
+    }
+  };
+
+  // ======================================================================
+  // MODULE 7 – Functies
+  // ======================================================================
+  const NAMEN = ['Lotte', 'Milan', 'Noor', 'Yasin', 'Fien', 'Rayan', 'Emma', 'Lucas', 'Lina', 'Adam', 'Mila', 'Jules', 'Zoë', 'Nathan', 'Elif', 'Wout'];
+  function m7data(seed, mode) {
+    const r = rng(seed + '|m7|' + mode);
+    const names = r.shuffle(NAMEN).slice(0, 10);
+    let scores;
+    for (let t = 0; t < 500; t++) {
+      const pool = r.shuffle(Array.from({ length: mode === 'test' ? 200 : 84 }, (_, i) => i + (mode === 'test' ? 180 : 12))).slice(0, 9);
+      const avg = pool.reduce((a, b) => a + b, 0) / 9;
+      const f1 = avg * 10 - Math.floor(avg * 10), f0 = avg - Math.floor(avg);
+      if (Math.abs(f0 - 0.5) > 0.06 && f0 > 0.05 && Math.abs(f1 - 0.5) > 0.06) { scores = pool; break; }
+    }
+    const absent = r.int(1, 8);
+    const col = names.map((n, i) => i === absent ? 'afwezig' : scores[i < absent ? i : i - 1]);
+    return { names, col, nums: scores, dec: mode === 'test' ? 1 : 0, titel: mode === 'test' ? 'Sportdag: verspringen (cm)' : 'Sportdag: touwtjespringen' };
+  }
+  const B_RANGE = Array.from({ length: 10 }, (_, i) => 'B' + (4 + i));
+
+  function checkFunc(sheet, a, d, fn, expect, extra) {
+    const needed = B_RANGE.filter(c => isNum(sheet.value(c)));
+    const NL = { SUM: 'SOM', AVERAGE: 'GEMIDDELDE', MAX: 'MAX', MIN: 'MIN', MEDIAN: 'MEDIAAN', COUNT: 'AANTAL', ROUND: 'AFRONDEN' };
+    const f = sheet.formula(a);
+    if (f && FX.isErr(sheet.calc(a))) return checkFormula(sheet, a, {});
+    if (f) {
+      const inf = FX.info(f, 'en');
+      const buiten = [...new Set(inf.cells)].filter(c => !/^B(3|4|5|6|7|8|9|10|11|12|13)$/.test(c) && !(extra && extra.allowRefs && extra.allowRefs.includes(c)));
+      const anyFn = ['SUM', 'AVERAGE', 'MAX', 'MIN', 'MEDIAN', 'COUNT', 'COUNTA'].some(x => inf.funcs.includes(x));
+      if (!anyFn && inf.hasRef) return no(`Je rekende het zelf uit met ${dutch(f)}. Gebruik de functie ${NL[fn]}: =${NL[fn]}(B4:B13).`);
+      if (buiten.length && fn !== 'ROUND') return no(`Je formule gebruikt ook ${list(buiten)}. Gebruik alleen de scores: B4:B13.`);
+      if (fn === 'COUNT' && inf.funcs.includes('COUNTA')) return no('AANTALARG telt ook de tekst "afwezig" mee. Gebruik AANTAL: die telt alleen getallen.');
+      const others = ['SUM', 'AVERAGE', 'MAX', 'MIN', 'MEDIAN', 'COUNT'].filter(x => x !== fn && inf.funcs.includes(x) && !(extra && extra.allow && extra.allow.includes(x)));
+      if (!inf.funcs.includes(fn) && others.length) return no(`Je gebruikte ${others.map(x => NL[x]).join(' en ')}. Hier heb je ${NL[fn]} nodig.`);
+      if (!inf.funcs.includes(fn) && fn !== 'ROUND' && inf.hasRef) return no(`Je rekende het zelf uit met ${dutch(f)}. Gebruik de functie ${NL[fn]}: =${NL[fn]}(B4:B13).`);
+    }
+    return checkFormula(sheet, a, Object.assign({ expect, funcs: [fn], funcMsg: `Gebruik de functie ${NL[fn]}.`, refs: extra && extra.noRefs ? null : needed,
+      allRefsMsg: miss => `Je bereik is niet volledig: ${list(miss)} ${miss.length > 1 ? 'tellen' : 'telt'} niet mee. Het bereik is B4:B13.` }, extra || {}));
+  }
+
+  const m7 = {
+    id: 'm7', nr: 7,
+    title: 'Functies',
+    short: 'Excel heeft ingebouwde rekenhulpjes: SOM, GEMIDDELDE, MIN, MAX, MEDIAAN, AANTAL en AFRONDEN.',
+    skills: ['SOM', 'GEMIDDELDE', 'MIN en MAX', 'MEDIAAN', 'AANTAL', 'AFRONDEN', 'de puntkomma'],
+    lessons: [
+      { id: 'l1', title: 'Een functie: een rekenhulpje',
+        body: `<p>Weet je nog hoe lang de formule <b>=D4+D5+D6+D7+D8+D9</b> was? Met een <b>functie</b> gaat het korter: <b>=SOM(D4:D9)</b>.</p>
+<p>Een functie heeft een <b>naam</b> (SOM), dan <b>haakjes</b>, en daartussen een <b>bereik</b> (D4:D9). Het bereik schrijf je met een <b>dubbelpunt</b>, zoals in stap 1.</p>
+<p>Snel: klik onder je getallen en klik op de knop <b>AutoSom Σ</b> (tab Start), of druk <span class="key">Alt</span> + <span class="key">=</span>.</p>`,
+        widget: { type: 'sheetSim', rows: 6, cols: 2, widths: [90, 90], cells: { A1: 'Week', B1: 'Gespaard', A2: 'week 1', B2: 3, A3: 'week 2', B3: 5, A4: 'week 3', B4: 2, A5: 'week 4', B5: 6, A6: 'Totaal' }, rounds: [
+          { select: 'B6', ask: 'Bereken in <span class="addr">B6</span> het totaal met de functie <b>=SOM(B2:B5)</b>.',
+            check: (s, ch) => {
+              if (ch !== 'B6') return null;
+              const i = s.info('B6');
+              if (!i) return no('Een formule begint met =.');
+              if (i.error === '#SEP') return no('Tussen de eerste en de laatste cel van een bereik zet je een dubbelpunt: B2:B5.');
+              if (!i.funcs.includes('SUM')) return s.num('B6') === 16 ? no('Dat klopt, maar gebruik nu de functie SOM: =SOM(B2:B5).') : no('Gebruik de functie SOM: =SOM(B2:B5).');
+              return s.num('B6') === 16 ? ok('Juist: 16. Kort en krachtig!') : no(`Je formule geeft ${s.show('B6')}. Controleer het bereik: van B2 tot B5.`);
+            } },
+          { select: 'B2', ask: 'In week 1 werd er toch 10 euro gespaard. Verander <span class="addr">B2</span> in <b>10</b>. Kijk naar het totaal.',
+            check: (s, ch) => ch !== 'B2' ? null : s.num('B2') === 10 && s.num('B6') === 23 ? ok('Het totaal rekende vanzelf mee: 23.') : no('Typ 10 in B2. In B6 moet de formule met SOM blijven staan.') }
+        ] } },
+      { id: 'l2', title: 'SOM, GEMIDDELDE, MIN en MAX',
+        body: `<p><b>SOM</b> telt alles op. <b>GEMIDDELDE</b> telt alles op en deelt door het aantal getallen. <b>MAX</b> zoekt het grootste getal, <b>MIN</b> het kleinste.</p>
+<p>Ze werken allemaal op dezelfde manier: <b>=GEMIDDELDE(B2:B6)</b>, <b>=MAX(B2:B6)</b> …</p>`,
+        widget: { type: 'sheetSim', rows: 6, cols: 5, widths: [70, 50, 20, 110, 70], cells: { A1: 'Naam', B1: 'Punten', A2: 'Lotte', B2: 8, A3: 'Milan', B3: 3, A4: 'Noor', B4: 10, A5: 'Yasin', B5: 5, A6: 'Fien', B6: 9, D2: 'Gemiddelde', D3: 'Hoogste', D4: 'Laagste' }, rounds: [
+          { select: 'E2', ask: 'Bereken in <span class="addr">E2</span> het gemiddelde van de punten.', check: (s, ch) => ch !== 'E2' ? null : simFunc(s, 'E2', 'AVERAGE', 7) },
+          { select: 'E3', ask: 'Zoek in <span class="addr">E3</span> de hoogste score.', check: (s, ch) => ch !== 'E3' ? null : simFunc(s, 'E3', 'MAX', 10) },
+          { select: 'E4', ask: 'Zoek in <span class="addr">E4</span> de laagste score.', check: (s, ch) => ch !== 'E4' ? null : simFunc(s, 'E4', 'MIN', 3) }
+        ] } },
+      { id: 'l3', title: 'MEDIAAN en AANTAL',
+        body: `<p><b>MEDIAAN</b> zoekt het <b>middelste</b> getal. Zet de getallen in volgorde: het getal in het midden is de mediaan. Bij een even aantal neemt Excel het gemiddelde van de twee middelste.</p>
+<p><b>AANTAL</b> telt hoeveel <b>getallen</b> er in een bereik staan. Tekst en lege cellen telt het niet mee. (<b>AANTALARG</b> telt alles wat niet leeg is.)</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Wat is de mediaan van 3, 9 en 4?', options: ['4', '9', '5,33'], correct: 0, explain: 'In volgorde: 3, 4, 9. Het middelste getal is 4.' },
+          { q: 'Wat is de mediaan van 2, 4, 6 en 100?', options: ['28', '5', '4'], correct: 1, explain: 'De twee middelste zijn 4 en 6. Hun gemiddelde is 5. Het rare getal 100 telt nauwelijks mee: daarom is de mediaan handig.' },
+          { q: 'In B2:B5 staat: 5, "afwezig", 7 en een lege cel. Wat geeft =AANTAL(B2:B5)?', options: ['4', '3', '2'], correct: 2, explain: 'Alleen 5 en 7 zijn getallen.' }
+        ] } },
+      { id: 'l4', title: 'AFRONDEN en de puntkomma',
+        body: `<p>Een gemiddelde heeft vaak veel cijfers na de komma. Met <b>AFRONDEN</b> rond je het getal echt af: <b>=AFRONDEN(B6;1)</b> rondt B6 af op 1 decimaal.</p>
+<p>Let op de <b>puntkomma ;</b> tussen de twee delen. In een Belgische Excel gebruik je altijd een puntkomma tussen de delen van een functie.</p>
+<p>Verschil met stap 5: "Minder decimalen" verandert alleen wat je <b>ziet</b>. AFRONDEN verandert het <b>getal zelf</b>.</p>`,
+        widget: { type: 'sheetSim', rows: 7, cols: 2, widths: [110, 90], cells: { A1: 'Toets', B1: 'Punten', A2: 'toets 1', B2: 7, A3: 'toets 2', B3: 8, A4: 'toets 3', B4: 8, A6: 'Gemiddelde', A7: 'Afgerond' }, rounds: [
+          { select: 'B6', ask: 'Bereken in <span class="addr">B6</span> het gemiddelde van de drie toetsen.', check: (s, ch) => ch !== 'B6' ? null : simFunc(s, 'B6', 'AVERAGE', 23 / 3) },
+          { select: 'B7', ask: 'Rond het gemiddelde in <span class="addr">B7</span> af op <b>1 decimaal</b>: =AFRONDEN(B6;1)',
+            check: (s, ch) => {
+              if (ch !== 'B7') return null;
+              const i = s.info('B7');
+              if (!i) return no('Een formule begint met =.');
+              if (i.error === '#SEP' || /AFRONDEN\([^;]*,/i.test(String(s.raw('B7')))) return no('Gebruik een puntkomma tussen de delen: =AFRONDEN(B6;1).');
+              if (!i.funcs.includes('ROUND')) return no('Gebruik de functie AFRONDEN.');
+              return s.num('B7') === 7.7 ? ok('Juist: 7,7.') : no(`Je formule geeft ${s.show('B7')}. Het moet 7,7 zijn.`);
+            } }
+        ] } },
+      { id: 'l5', title: 'Tikfouten en andere talen',
+        body: `<p>Typ je de naam van een functie fout, bv. <b>=SOMM(B2:B5)</b>, dan toont Excel <b>#NAAM?</b>.</p>
+<p>Kleine letters mogen: typ je <b>=som(b2:b5)</b>, dan maakt Excel er zelf hoofdletters van.</p>
+<p>Werk je ooit in een Engelse Excel? Dan hebben de functies Engelse namen: SOM is <b>SUM</b>, GEMIDDELDE is <b>AVERAGE</b>, en je gebruikt een komma in plaats van een puntkomma.</p>`,
+        widget: { type: 'quiz', questions: [
+          { q: 'Je typt =SOMM(B2:B5). Wat toont Excel?', options: ['De som', '#NAAM?', '#DEEL/0!'], correct: 1, explain: 'SOMM bestaat niet. Excel begrijpt de naam niet.' },
+          { q: 'Je typt =gemiddelde(b2:b5) in kleine letters. Werkt dat?', options: ['Ja, Excel maakt er hoofdletters van', 'Nee, je krijgt een fout'], correct: 0, explain: 'Kleine letters zijn geen probleem.' },
+          { q: 'Hoe heet SOM in een Engelse Excel?', options: ['TOTAL', 'SUM', 'PLUS'], correct: 1, explain: 'SUM. Een bestand dat je in een Nederlandse Excel maakt, werkt ook in een Engelse: Excel vertaalt de namen zelf.' }
+        ] } }
+    ],
+    startFile(seed, mode) {
+      const d = m7data(seed, mode), b = { bold: true };
+      const cells = { A1: { v: d.titel, bold: true, size: 14 }, A3: { v: 'Naam', ...b }, B3: { v: mode === 'test' ? 'Afstand' : 'Sprongen', ...b },
+        D4: 'Alles samen', D5: 'Gemiddelde', D6: d.dec ? 'Gemiddelde (1 decimaal)' : 'Gemiddelde afgerond', D7: 'Hoogste', D8: 'Laagste', D9: 'Mediaan', D10: 'Aantal deelnemers' };
+      d.names.forEach((n, i) => { cells['A' + (4 + i)] = n; cells['B' + (4 + i)] = d.col[i]; });
+      return { name: mode === 'test' ? 'Test7_functies.xlsx' : 'Module7_functies.xlsx', spec: { sheetName: 'Sportdag', cells, colWidths: { A: 12, B: 11, D: 26, E: 12 } } };
+    },
+    gen(seed, mode) {
+      const d = m7data(seed, mode), v = d.nums, n = v.length;
+      const sum = v.reduce((a, b) => a + b, 0), avg = sum / n, sorted = v.slice().sort((a, b) => a - b);
+      const rnd = FX.evaluate(`ROUND(${avg},${d.dec})`, { locale: 'en', get: () => null });
+      return { startFile: true, tasks: [
+        { id: 't1', text: `Bereken in <span class="addr">E4</span> ${mode === 'test' ? 'alle afstanden' : 'alle sprongen'} samen met de functie <b>SOM</b>.`,
+          hints: ['Een functie: naam, haakjes, bereik.', 'Typ =SOM(B4:B13) of gebruik de knop AutoSom Σ en controleer het bereik.'],
+          check: ({ sheet }) => checkFunc(sheet, 'E4', d, 'SUM', sum) },
+        { id: 't2', text: `Bereken in <span class="addr">E5</span> het <b>gemiddelde</b>.`,
+          hints: ['De functie heet GEMIDDELDE.', 'Typ =GEMIDDELDE(B4:B13). De tekst "afwezig" telt Excel niet mee.'],
+          check: ({ sheet }) => checkFunc(sheet, 'E5', d, 'AVERAGE', avg) },
+        { id: 't3', text: `Toon in <span class="addr">E6</span> het gemiddelde, <b>afgerond op ${d.dec ? '1 decimaal' : 'een geheel getal (0 decimalen)'}</b>, met de functie AFRONDEN.`,
+          hints: [`AFRONDEN heeft twee delen: het getal en het aantal decimalen, met een puntkomma ertussen.`, `Typ =AFRONDEN(E5;${d.dec}) of =AFRONDEN(GEMIDDELDE(B4:B13);${d.dec}).`],
+          check: ({ sheet }) => {
+            const f = sheet.formula('E6');
+            if (f && !FX.info(f, 'en').funcs.includes('ROUND')) return no('Gebruik de functie AFRONDEN. Met "Minder decimalen" verandert alleen de weergave, niet het getal zelf.');
+            return checkFormula(sheet, 'E6', { expect: rnd, funcs: ['ROUND'], funcMsg: 'Gebruik de functie AFRONDEN.',
+              wrongMsg: (val) => isNum(val) && Math.abs(val - FX.evaluate(`ROUND(${avg},${d.dec ? 0 : 1})`, { locale: 'en', get: () => null })) < 1e-9 ? `Je rondde af op ${d.dec ? 0 : 1} ${d.dec ? 'decimalen' : 'decimaal'}. Het tweede deel van AFRONDEN is het aantal decimalen: ${d.dec}.` : null });
+          } },
+        { id: 't4', text: `Zoek in <span class="addr">E7</span> de <b>hoogste</b> score met een functie.`,
+          hints: ['Het grootste getal zoek je met MAX.', 'Typ =MAX(B4:B13).'],
+          check: ({ sheet }) => checkFunc(sheet, 'E7', d, 'MAX', sorted[n - 1]) },
+        { id: 't5', text: `Zoek in <span class="addr">E8</span> de <b>laagste</b> score met een functie.`,
+          hints: ['Het kleinste getal zoek je met MIN.', 'Typ =MIN(B4:B13). Afwezig telt niet mee.'],
+          check: ({ sheet }) => checkFunc(sheet, 'E8', d, 'MIN', sorted[0]) },
+        { id: 't6', text: `Zoek in <span class="addr">E9</span> de <b>mediaan</b>: de middelste score.`,
+          hints: ['De functie heet MEDIAAN.', 'Typ =MEDIAAN(B4:B13).'],
+          check: ({ sheet }) => checkFunc(sheet, 'E9', d, 'MEDIAN', sorted[(n - 1) / 2]) },
+        { id: 't7', text: `Tel in <span class="addr">E10</span> hoeveel leerlingen <b>meededen</b> met de functie AANTAL.`,
+          hints: ['AANTAL telt alleen de getallen in een bereik.', 'Typ =AANTAL(B4:B13). De afwezige leerling telt dan niet mee.'],
+          check: ({ sheet }) => checkFunc(sheet, 'E10', d, 'COUNT', n) }
+      ] };
+    }
+  };
+  /* controle in het mini-rekenblad: juiste functie en uitkomst */
+  function simFunc(s, a, fn, expect) {
+    const NL = { SUM: 'SOM', AVERAGE: 'GEMIDDELDE', MAX: 'MAX', MIN: 'MIN', MEDIAN: 'MEDIAAN', COUNT: 'AANTAL' };
+    const i = s.info(a);
+    if (!i) return no('Een formule begint met =.');
+    if (i.error === '#SEP') return no('Tussen de eerste en de laatste cel van een bereik zet je een dubbelpunt, bv. B2:B6.');
+    if (s.isErr(a)) return no(`${a} toont ${s.show(a)}. Controleer de naam van de functie.`);
+    if (!i.funcs.includes(fn)) { const other = i.funcs.find(x => NL[x]); return no(other ? `Je gebruikte ${NL[other]}. Hier heb je ${NL[fn]} nodig.` : `Gebruik de functie ${NL[fn]}.`); }
+    const v = s.num(a);
+    return v != null && Math.abs(v - expect) < 1e-9 ? ok(`Juist: ${s.show(a)}.`) : no(`Je formule geeft ${s.show(a)}. Controleer het bereik.`);
+  }
+
+  const MODULES = [m1, m2, m3, m4, m5, m6, m7];
 
   /* Volgende modules (nog te bouwen) – getoond als vooruitblik. */
   const SOON = [
-    { nr: 6, title: 'Je eerste formules', short: 'Rekenen met celadressen en formules doortrekken.' },
-    { nr: 7, title: 'Functies', short: 'SOM, GEMIDDELDE, MEDIAAN, MIN, MAX en AFRONDEN.' },
     { nr: 8, title: 'Project: mijn maandrapport', short: 'Je bouwt je eigen rapport voor dagelijks werk.', project: true },
     { nr: 9, title: 'Excel kiest: ALS', short: 'Excel zegt zelf "juist" of "probeer opnieuw".' },
     { nr: 10, title: 'Keuzelijsten en kleuren die reageren', short: 'Gegevensvalidatie en voorwaardelijke opmaak.' },

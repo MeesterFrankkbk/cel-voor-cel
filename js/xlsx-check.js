@@ -4,6 +4,8 @@
 (function (root) {
   'use strict';
 
+  const F = (typeof module !== 'undefined' && module.exports) ? require('./formula.js') : root.CvcFormula;
+
   // ---------- adressen ----------
   function colToNum(col) {
     let n = 0;
@@ -287,8 +289,17 @@
         else if (t === 'b') v = vEl ? textOf(vEl) === '1' : null;
         else if (t === 'e') v = vEl ? textOf(vEl) : null;
         else v = vEl && textOf(vEl) !== '' ? parseFloat(textOf(vEl)) : null;
-        cells[addr(p.c, p.r)] = { v, t, f: fEl ? textOf(fEl) : null, s: +(attr(c, 's') || 0) };
+        cells[addr(p.c, p.r)] = { v, t, f: fEl ? textOf(fEl) : null, ft: fEl ? attr(fEl, 't') : null, si: fEl ? attr(fEl, 'si') : null, s: +(attr(c, 's') || 0) };
       });
+    });
+    // gedeelde formules: Excel bewaart de formule één keer en verwijst ernaar vanuit de andere cellen
+    const masters = {};
+    Object.entries(cells).forEach(([a, c]) => { if (c.ft === 'shared' && c.f && c.si != null) masters[c.si] = { a, f: c.f }; });
+    Object.entries(cells).forEach(([a, c]) => {
+      if (c.ft === 'shared' && !c.f && masters[c.si] && F) {
+        const m = parseAddr(masters[c.si].a), q = parseAddr(a);
+        c.f = F.shift(masters[c.si].f, q.r - m.r, q.c - m.c);
+      }
     });
     const cols = [];
     kids(kid(sx, 'cols'), 'col').forEach(c => cols.push({
@@ -321,7 +332,7 @@
   }
 
   // ---------- Werkmap / blad ----------
-  function Workbook(sheets, styles, meta) { this.sheets = sheets; this.styles = styles; this.meta = meta; }
+  function Workbook(sheets, styles, meta) { this.sheets = sheets; this.styles = styles; this.meta = meta; sheets.forEach(s => { s.wb = this; }); }
   Workbook.prototype.sheet = function (name) {
     if (name == null) return this.sheets.find(s => s.state === 'visible') || this.sheets[0];
     const n = String(name).trim().toLowerCase();
@@ -360,6 +371,33 @@
       locked: xf.locked !== false
     };
   };
+  /* De formule in een cel (zonder =), of null. */
+  Sheet.prototype.formula = function (a) { const c = this.cell(a); return c && c.f ? c.f : null; };
+  /* Rekent een cel zelf uit (ook als Excel geen uitkomst bewaarde). Fout -> { error: '#DIV/0!' }. */
+  Sheet.prototype.calc = function (a, seen) {
+    a = String(a).toUpperCase();
+    const c = this.cell(a);
+    if (!c) return null;
+    if (!c.f || !F) { if (c.t === 'e' && F) return new F.Err(c.v); return c.v; }
+    this._memo = this._memo || {};
+    if (a in this._memo) return this._memo[a];
+    seen = seen || new Set();
+    if (seen.has(this.name + '!' + a)) return c.v;
+    seen.add(this.name + '!' + a);
+    let v;
+    try {
+      v = F.evaluate(c.f, { locale: 'en', get: (ref, sheet) => {
+        const sh = sheet ? (this.wb && this.wb.sheet(sheet)) : this;
+        if (!sh) return new F.Err('#REF!');
+        return sh.calc(ref, seen);
+      } });
+    } catch (e) { v = c.v; }
+    if (F.isErr(v) && v.error === '#NAME?' && c.v != null && c.t !== 'e') v = c.v; // onbekende functie: vertrouw de uitkomst van Excel
+    this._memo[a] = v;
+    return v;
+  };
+  /* Wat staat er in de formule van deze cel? */
+  Sheet.prototype.formulaInfo = function (a) { const f = this.formula(a); return f && F ? F.info(f, 'en') : null; };
   Sheet.prototype.numFmt = function (a) {
     const st = this.style(a);
     return numFmtInfo(st.numFmtId, this.styles.numFmts[st.numFmtId]);

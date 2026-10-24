@@ -24,8 +24,10 @@ Open je `index.html` zonder Netlify (bv. lokaal), dan start de app in **demomodu
 3. Cellen opmaken
 4. Excel vult zelf aan (vulgreep, reeksen, maanden, dagen, honderdveld)
 5. Getallen tonen (procent, euro, decimalen, datum, komma)
+6. Je eerste formules (=, + − * /, celadressen, doortrekken, haakjes, foutmeldingen)
+7. Functies (SOM, GEMIDDELDE, MIN, MAX, MEDIAAN, AANTAL, AFRONDEN)
 
-Het ontwerp van stap 4 en 5 staat in `docs/ontwerp-stap-4-5.md`.
+Het ontwerp van elke stap staat in de map `docs/`.
 
 ## Hoe het werkt
 
@@ -38,7 +40,7 @@ Het ontwerp van stap 4 en 5 staat in `docs/ontwerp-stap-4-5.md`.
 
 ## Wat de app in een Excel-bestand controleert
 
-Celinhoud, reeksen (ook gekopieerd in plaats van doorgevuld, te ver gesleept, Engelse maandnamen), honderdveld, getalnotatie (procent, euro, aantal decimalen, datum), getal of tekst (komma/punt), bladnaam, bestandsnaam, ingevoegde rijen, twee lijnen in een cel (Alt + Enter), kolombreedte, vet/schuin/onderstreept, letter- en opvulkleur (ook themakleuren), uitlijning, rijhoogte, samengevoegde cellen, lettergrootte en randen. De lezer kan ook al formules, gegevensvalidatie, voorwaardelijke opmaak en bladbeveiliging uitlezen, voor de volgende stappen.
+Formules (de app rekent ze zelf na, ook doorgetrokken formules: juiste adressen, juiste functie, juist bereik, getal getypt in plaats van formule, = vergeten, x in plaats van *), celinhoud, reeksen (ook gekopieerd in plaats van doorgevuld, te ver gesleept, Engelse maandnamen), honderdveld, getalnotatie (procent, euro, aantal decimalen, datum), getal of tekst (komma/punt), bladnaam, bestandsnaam, ingevoegde rijen, twee lijnen in een cel (Alt + Enter), kolombreedte, vet/schuin/onderstreept, letter- en opvulkleur (ook themakleuren), uitlijning, rijhoogte, samengevoegde cellen, lettergrootte en randen. De lezer kan ook al formules, gegevensvalidatie, voorwaardelijke opmaak en bladbeveiliging uitlezen, voor de volgende stappen.
 
 ## Bestanden
 
@@ -48,6 +50,7 @@ Celinhoud, reeksen (ook gekopieerd in plaats van doorgevuld, te ver gesleept, En
 | `leerkracht.html`, `js/leerkracht.js` | leerkrachtoverzicht |
 | `js/modules.js` | **inhoud**: lessen, opdrachten, hulplijnen en controles per stap |
 | `js/xlsx-check.js` | leest een .xlsx-bestand (waarden en opmaak) |
+| `js/formula.js` | rekent formules na (Nederlands en Engels) |
 | `js/xlsx-write.js` | maakt de startbestanden |
 | `js/api.js` | praat met de opslag (of demomodus) |
 | `netlify/functions/api.mjs` | opslag op Netlify |
