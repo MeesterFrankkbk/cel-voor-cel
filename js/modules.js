@@ -2354,6 +2354,7 @@
     skills: ['plannen', 'voor iemand anders', '10 vragen', 'ALS en AANTAL.ALS', 'kleuren', 'afbeelding', 'beveiligen', 'testen'],
     tabLabels: { practice: 'Tussentijds nakijken', test: 'Inleveren' },
     tabShort: { practice: 'Nakijken' },
+    reflect: [{ id: 'trots', label: 'Waar ben je het meest trots op?' }, { id: 'moeilijk', label: 'Wat was het moeilijkst, en hoe loste je het op?' }, { id: 'anders', label: 'Wat zou je een volgende keer anders doen?', optional: true }],
     noun: 'werkblad', fileWord: 'werkblad',
     levels: NIVEAUS, levelOf, withLevel, starsOf,
     passCheck: (tasks, results) => starsOf(tasks, results) >= 1,   // in orde = alles van ★ klopt; elke ster meer is een extra

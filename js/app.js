@@ -1109,7 +1109,7 @@
           ? h('p', { class: 'msg ok' }, mode === 'test' ? h('span', {}, h('b', {}, m.levels ? 'Goedgekeurd! ' : 'Geslaagd! '), modIndex(m.id) < MODULES.length - 1 ? 'De volgende stap is open.' : (m.levels ? 'Je werkblad is ingeleverd. Je hebt alle stappen gehaald!' : 'Je hebt alle stappen gehaald.')) : h('span', {}, h('b', {}, 'Alles in orde! '), m.levels ? 'Laat een klasgenoot je werkblad testen en lever het daarna in.' : 'Je bent klaar voor de test.'))
           : h('p', { class: 'msg info' }, mode === 'test' ? (m.project ? `Nog niet in orde. Verbeter de onderdelen met een ✗ in je ${noun} en laad het opnieuw op.` : 'Nog niet geslaagd. Oefen de opdrachten met een ✗ nog eens en start daarna een nieuwe test.') : 'Verbeter de opdrachten met een ✗ in Excel, bewaar en laad opnieuw op.'),
         passed && mode === 'practice' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => { S.tab = 'test'; render(); window.scrollTo(0, 0); } }, `Naar ${TLt} →`), m.levels ? null : h('button', { class: 'btn', onclick: async () => { await save(m.id, { practice: { seed: newSeed(), started: new Date().toISOString(), lastSeed: null, lastResults: null } }); render(); } }, 'Nieuwe oefeningen')) : null,
-        passed && mode === 'test' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => { S.view = 'home'; render(); } }, 'Naar de leerlijn →')) : null,
+        passed && mode === 'test' ? reflectBlock(m) : null,
         !passed && mode === 'test' ? h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: () => { S.tab = 'practice'; render(); } }, m.tabLabels?.practice || 'Oefenen'), h('button', { class: 'btn primary', onclick: () => startTest(m) }, m.project ? 'Opnieuw opladen' : 'Nieuwe test')) : null));
     }
     const testFinished = mode === 'test' && last;
@@ -1149,6 +1149,50 @@
       startTest(m);
     });
   }
+  // ---------------- terugblik (na een geslaagde test) ----------------
+  const FEELS = [['easy', '😊', 'makkelijk'], ['ok', '🙂', 'goed te doen'], ['hard', '😓', 'moeilijk']];
+  const DEFAULT_REFLECT = [{ id: 'nieuw', label: 'Wat was nieuw voor jou?', optional: true }];
+  function reflectBlock(m) {
+    const r = prog(m.id).reflect;
+    const toHome = h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => { S.view = 'home'; render(); } }, 'Naar de leerlijn →'));
+    if (r && r.feel) {
+      const f = FEELS.find(x => x[0] === r.feel) || FEELS[1];
+      const Q = m.reflect || DEFAULT_REFLECT;
+      return h('div', { class: 'reflect done' },
+        h('p', {}, h('b', {}, 'Je terugblik: '), f[1] + ' ' + f[2]),
+        Q.filter(q => (r[q.id] || '').trim()).map(q => h('p', { class: 'small' }, h('b', {}, q.label + ' '), r[q.id])),
+        h('div', { class: 'btn-row' }, toHome.firstChild, h('button', { class: 'btn ghost small', onclick: e => { e.currentTarget.closest('.reflect').replaceWith(reflectForm(m, r)); } }, 'Wijzig')));
+    }
+    return reflectForm(m, null);
+  }
+  function reflectForm(m, r) {
+    const Q = m.reflect || DEFAULT_REFLECT;
+    let feel = r ? r.feel : null;
+    const btn = h('button', { class: 'btn primary', disabled: true }, 'Bewaar en ga verder');
+    const fields = Q.map(q => h('textarea', { class: 'in', id: 'refl-' + q.id, rows: 2, maxlength: 400 }));
+    Q.forEach((q, k) => { fields[k].value = (r && r[q.id]) || ''; });
+    const upd = () => { btn.disabled = !feel || Q.some((q, k) => !q.optional && !fields[k].value.trim()); };
+    const feelBtns = FEELS.map(([id, emo, label]) => h('button', { class: 'feel' + (feel === id ? ' on' : ''), role: 'radio', 'aria-checked': String(feel === id), onclick: e => {
+      feel = id; feelBtns.forEach(b => { const on = b === e.currentTarget; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); }); upd();
+    } }, h('span', { class: 'emo', 'aria-hidden': 'true' }, emo), label));
+    fields.forEach(f => f.addEventListener('input', upd));
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const data = { feel, at: new Date().toISOString() };
+      Q.forEach((q, k) => { data[q.id] = fields[k].value.trim(); });
+      await save(m.id, { reflect: data });
+      render();
+    });
+    upd();
+    return h('div', { class: 'reflect' },
+      h('b', {}, m.levels ? 'Terugblik op je eindproject' : 'Even terugblikken'),
+      h('p', { class: 'small' }, m.levels ? 'Je hebt het hele traject afgewerkt! Hoe ging het eindproject?' : 'Hoe ging deze stap voor jou?'),
+      h('div', { class: 'feels', role: 'radiogroup', 'aria-label': 'Hoe ging het?' }, feelBtns),
+      Q.map((q, k) => h('label', { class: 'f', for: 'refl-' + q.id }, h('span', {}, q.label, q.optional ? h('small', {}, ' (mag leeg blijven)') : null), fields[k])),
+      h('p', { class: 'small muted' }, 'Je leerkracht leest je terugblik.'),
+      h('div', { class: 'btn-row' }, btn));
+  }
+
   function renderTestGate(m, root) {
     if (m.gate) return renderGateChecks(m, root);
     const p = prog(m.id).test || {};

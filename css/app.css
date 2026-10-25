@@ -400,3 +400,18 @@ textarea.in { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid v
 textarea.in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .tl-short { display: none; }
 @media (max-width: 560px) { .tl-long { display: none; } .tl-short { display: inline; } }
+
+/* ---------- terugblik ---------- */
+.reflect { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 8px; }
+.reflect.done { border-color: var(--line-strong); background: var(--sheet); }
+.reflect p { margin: 0; }
+.feels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.feel { display: grid; justify-items: center; gap: 2px; padding: 8px 4px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--sheet); color: var(--ink); font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
+.feel .emo { font-size: 1.6rem; line-height: 1.1; }
+.feel:hover { border-color: var(--accent); }
+.feel.on { border: 2px solid var(--accent); padding: 7px 3px; }
+.feel:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.reflect textarea.in { background: var(--sheet); }
+.feel-tag { font-weight: 700; }
+.feel-tag.ok { color: var(--ok); } .feel-tag.mark { color: var(--muted); } .feel-tag.bad { color: var(--bad); }
+.peer.refl { border-left-color: var(--accent); background: var(--accent-soft); }

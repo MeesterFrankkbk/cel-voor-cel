@@ -43,6 +43,7 @@ Het ontwerp van elke stap staat in de map `docs/`.
 - **Opladen**: twee routes (map OneDrive zichtbaar of niet). De app waarschuwt bij een oud bestand of een onveranderd startbestand.
 - **Stap 12** is gedifferentieerd. De leerling kiest een niveau (★ Basis, ★★ Gevorderd, ★★★ Expert) en mag altijd wisselen. Bij *Tussentijds nakijken* laadt hij zo vaak op als hij wil, met tips. Bij *Inleveren* vult hij eerst in wie zijn werkblad testte en welke tip hij kreeg. Het werkblad is goedgekeurd als alles van ★ in orde is; de leerkracht ziet het niveau, de behaalde sterren, de tester en de tip.
 - **Vrije opbouw in stap 12**: de app zoekt zelf de vragen (elke ALS-formule die naar een antwoordcel kijkt) en speelt daarna gebruiker: ze vult in gedachten alles juist, fout en leeg in en rekent het hele werkblad door (feedback, score, procent, eindboodschap, kleuren). Oplossingen mogen in een verborgen kolom, op een verborgen blad of in de formule zelf staan.
+- **Terugblik**: na elke geslaagde test kiest de leerling met één klik hoe het ging (😊 makkelijk, 🙂 goed te doen, 😓 moeilijk) en mag hij kort schrijven wat nieuw was. Na het eindproject volgt een grotere terugblik (trots op, moeilijkst, volgende keer anders). De leerkracht ziet dit in het overzicht, bij de leerling en in de CSV.
 - **Verder werken**: het laatst opgeladen bestand is op elk toestel opnieuw te downloaden.
 
 ## Wat de app in een Excel-bestand controleert

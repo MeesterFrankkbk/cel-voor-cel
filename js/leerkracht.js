@@ -58,6 +58,9 @@
     return { p, ld, prA, hints, testBest: p.test?.best, testPassed: !!p.test?.passed, testN: p.test?.attempts || 0, practicePassed: !!p.practice?.passed, skipped: !ld && !prA.length && (p.test?.attempts || 0) > 0,
       level, stars: p.test?.stars || 0, peer: p.peer || null };
   }
+  const FEELS = { easy: ['😊', 'makkelijk', 'ok'], ok: ['🙂', 'goed te doen', 'mark'], hard: ['😓', 'moeilijk', 'bad'] };
+  const reflectQ = m => m.reflect || [{ id: 'nieuw', label: 'Wat was nieuw?' }];
+  const reflectTxt = (m, r) => reflectQ(m).filter(q => (r[q.id] || '').trim()).map(q => `${q.label} ${r[q.id]}`).join(' · ');
   const TL = (m, mode) => (m.tabLabels && m.tabLabels[mode]) || (mode === 'test' ? 'Test' : 'Oefenen');
   const starTxt = n => n ? '★'.repeat(n) : 'geen ster';
 
@@ -79,6 +82,7 @@
             const st = modStatus(s, m);
             return h('td', {}, h('div', { class: 'mcell' },
               h('div', { class: 'dots', title: `Leren ${st.ld}/${m.lessons.length}` }, m.lessons.map(l => h('span', { class: 'dot' + (st.p.lessons?.[l.id] ? ' on' : '') }))),
+              st.p.reflect?.feel ? h('span', { class: 'small feel-tag ' + FEELS[st.p.reflect.feel][2], title: reflectTxt(m, st.p.reflect) || 'geen extra uitleg' }, FEELS[st.p.reflect.feel][0] + ' ' + FEELS[st.p.reflect.feel][1]) : null,
               st.level ? h('span', { class: 'small' }, 'Niveau ', h('b', {}, '★'.repeat(st.level))) : null,
               h('span', { class: 'small' }, m.levels ? 'Tussentijds: ' : 'Oefenen: ', st.practicePassed ? h('b', { style: 'color:var(--ok)' }, '✓') : (st.prA.length ? st.prA.length + '×' : '–'), st.hints ? h('span', { class: 'muted' }, ` · ${st.hints} hulp`) : null),
               h('span', { class: 'small' }, m.levels ? 'Ingeleverd: ' : 'Test: ', st.testN ? h('b', { style: `color:var(--${st.testPassed ? 'ok' : 'bad'})` }, m.levels ? (st.testPassed ? '✓ ' + starTxt(st.stars) : 'nog niet in orde') : `${st.testBest || 0}%`) : '–', st.testN > 1 ? h('span', { class: 'muted' }, ` (${st.testN}×)`) : null, st.skipped ? h('span', { class: 'chip', style: 'margin-left:4px' }, 'kon het al') : null)));
@@ -93,10 +97,10 @@
   }
 
   function exportCsv() {
-    const rows = [['Klas', 'Voornaam', 'Naam'].concat(...MODULES.map(m => [`M${m.nr} lessen`, `M${m.nr} oefenen klaar`, `M${m.nr} oefenpogingen`, `M${m.nr} hulplijnen`, `M${m.nr} test beste %`, `M${m.nr} test geslaagd`, `M${m.nr} testpogingen`].concat(m.levels ? [`M${m.nr} niveau`, `M${m.nr} sterren`, `M${m.nr} getest door`, `M${m.nr} tip`] : [])), ['Laatst actief'])];
+    const rows = [['Klas', 'Voornaam', 'Naam'].concat(...MODULES.map(m => [`M${m.nr} lessen`, `M${m.nr} oefenen klaar`, `M${m.nr} oefenpogingen`, `M${m.nr} hulplijnen`, `M${m.nr} test beste %`, `M${m.nr} test geslaagd`, `M${m.nr} testpogingen`, `M${m.nr} gevoel`, `M${m.nr} terugblik`].concat(m.levels ? [`M${m.nr} niveau`, `M${m.nr} sterren`, `M${m.nr} getest door`, `M${m.nr} tip`] : [])), ['Laatst actief'])];
     T.students.filter(s => !T.klas || s.klas === T.klas).forEach(s => rows.push([s.klas, s.voornaam, s.naam].concat(...MODULES.map(m => {
       const st = modStatus(s, m);
-      return [`${st.ld}/${m.lessons.length}`, st.practicePassed ? 'ja' : 'nee', st.prA.length, st.hints, st.testBest ?? '', st.testPassed ? 'ja' : 'nee', st.testN].concat(m.levels ? [st.level || '', st.stars || 0, st.peer?.tester || '', st.peer?.tip || ''] : []);
+      return [`${st.ld}/${m.lessons.length}`, st.practicePassed ? 'ja' : 'nee', st.prA.length, st.hints, st.testBest ?? '', st.testPassed ? 'ja' : 'nee', st.testN, st.p.reflect?.feel ? FEELS[st.p.reflect.feel][1] : '', st.p.reflect ? reflectTxt(m, st.p.reflect) : ''].concat(m.levels ? [st.level || '', st.stars || 0, st.peer?.tester || '', st.peer?.tip || ''] : []);
     }), [s.lastSeen ? new Date(s.lastSeen).toLocaleString('nl-BE') : ''])));
     const csv = '﻿' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
     Api.download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `celvoorcel-overzicht${T.klas ? '-' + T.klas : ''}.csv`);
@@ -142,6 +146,8 @@
           m.levels
             ? h('span', { class: 'chip' + (st.testPassed ? ' ok' : st.testN ? ' bad' : '') }, `${TL(m, 'test')} ${st.testN ? (st.testPassed ? '✓ ' + starTxt(st.stars) : 'nog niet in orde') : '–'}`)
             : h('span', { class: 'chip' + (st.testPassed ? ' ok' : st.testN ? ' bad' : '') }, `Test ${st.testN ? (st.testBest || 0) + '%' : '–'}${st.testPassed ? ' ✓' : ''}`)),
+        st.p.reflect?.feel ? h('div', { class: 'peer refl' }, h('b', {}, 'Terugblik: '), FEELS[st.p.reflect.feel][0] + ' ' + FEELS[st.p.reflect.feel][1],
+          reflectQ(m).filter(q => (st.p.reflect[q.id] || '').trim()).map(q => [h('br'), h('b', {}, q.label + ' '), st.p.reflect[q.id]])) : null,
         st.peer ? h('p', { class: 'peer' }, h('b', {}, 'Getest door: '), st.peer.tester || '–', st.peer.tip ? [h('br'), h('b', {}, 'Tip van de tester: '), st.peer.tip] : null) : null,
         atts.length ? h('div', { style: 'display:grid;gap:10px' }, atts.map(a => attemptCard(s, m, a))) : h('p', { class: 'muted small' }, 'Nog niets opgeladen.'));
     });
