@@ -1,12 +1,24 @@
 // Cel voor Cel – opslag van leerlingen, voortgang, pogingen en Excel-bestanden.
-// Netlify Function (v2) + Netlify Blobs. Omgevingsvariabele: LEERKRACHT_WACHTWOORD (verplicht).
+// Netlify Function (v2) + Netlify Blobs.
+//
+// Aanmelden gebeurt via MELK (melk-start.netlify.app):
+//  - leerling: MELK geeft een toegangsbewijs; deze functie laat het controleren door het meesterbestand
+//    (via de deur, actie llWie) en krijgt leerlingnummer, naam en klas terug. Geen eigen accounts of codes meer.
+//  - leerkracht: inloggen met de link per mail (MELK); deze functie vraagt het meesterbestand wie het is
+//    (actie lkWie). Een leerkracht ziet enkel de leerlingen van zijn klassen, een beheerder ziet iedereen.
+// Omgevingsvariabelen in Netlify:
+//  - LEERKRACHT_WACHTWOORD (bestaande waarde laten staan): dient nu enkel nog als geheime sleutel
+//    om de toegangsbewijzen van Cel voor Cel te ondertekenen. Niemand hoeft die nog te kennen.
+//    (In de plaats mag ook SESSION_SECRET.)
+//  - MELK_DEUR (optioneel): ander adres van de deur, standaard https://melk-start.netlify.app/api/deur
 import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
 
 export const config = { path: '/api/*' };
 
 const MAX_FILE = 3 * 1024 * 1024; // 3 MB
-const store = () => getStore({ name: 'celvoorcel', consistency: 'strong' });
+const APP = 'celvoorcel';
+const store = () => globalThis.__cvcStore || getStore({ name: 'celvoorcel', consistency: 'strong' });
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const fail = (msg, status = 400) => json({ error: msg }, status);
@@ -19,7 +31,7 @@ function env(name) {
 }
 function secret() {
   const s = env('SESSION_SECRET') || env('LEERKRACHT_WACHTWOORD');
-  if (!s) throw new Error('LEERKRACHT_WACHTWOORD is niet ingesteld in Netlify.');
+  if (!s) throw new Error('De geheime sleutel (LEERKRACHT_WACHTWOORD of SESSION_SECRET) is niet ingesteld in Netlify.');
   return 'cvc:' + s;
 }
 const b64u = b => Buffer.from(b).toString('base64url');
@@ -53,6 +65,22 @@ function deepMerge(target, patch) {
   return target;
 }
 
+// ---- MELK: het meesterbestand vragen wie iemand is (via de vaste deur) ----
+async function deur(actie, token) {
+  const adres = env('MELK_DEUR') || 'https://melk-start.netlify.app/api/deur';
+  const stop = new AbortController(); const klok = setTimeout(() => stop.abort(), 25000);
+  try {
+    const r = await fetch(adres, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ actie, token: String(token || ''), app: APP }), signal: stop.signal });
+    const d = await r.json().catch(() => null);
+    if (!d || typeof d !== 'object') return { ok: false, geenVerbinding: true };
+    return d;
+  } catch (e) { return { ok: false, geenVerbinding: true }; }
+  finally { clearTimeout(klok); }
+}
+const GEEN_MELK = 'MELK is even niet bereikbaar. Probeer het zo meteen opnieuw.';
+// Wat de leerkracht mag zien: een beheerder alles, anders enkel de leerlingen van zijn klassen.
+const magZien = (auth, s) => !!s && (auth.b === true || (Array.isArray(auth.kl) && auth.kl.includes(s.klascode)));
+
 async function getStudent(id) { return store().get('students/' + id, { type: 'json' }); }
 async function putStudent(s) { await store().setJSON('students/' + s.id, s); }
 
@@ -66,72 +94,67 @@ export default async (req) => {
   try {
     if (route === 'ping') return json({ ok: true, app: 'celvoorcel' });
 
-    // ---------------- leerling ----------------
-    if (route === 'login' && method === 'POST') {
-      const voornaam = clean(body.voornaam), naam = clean(body.naam), klas = clean(body.klas).toUpperCase(), code = String(body.code || '').trim();
-      if (!voornaam || !naam || !klas) return fail('Vul je voornaam, naam en klas in.');
-      if (!/^\d{4,8}$/.test(code)) return fail('Je code bestaat uit 4 tot 8 cijfers.');
-      const id = slug(klas) + '--' + slug(voornaam) + '--' + slug(naam);
+    // ---------------- leerling (aanmelden via MELK) ----------------
+    if (route === 'login') return fail('Je meldt je aan via MELK.', 410);
+    if (route === 'melk-login' && method === 'POST') {
+      const w = await deur('llWie', body.token);
+      if (!w.ok && w.nietVoorJou) return fail(w.fout || 'Cel voor Cel staat niet voor jou open.', 403);
+      if (!w.ok) return w.opnieuwInloggen ? fail('Meld je opnieuw aan via MELK.', 401) : fail(w.geenVerbinding ? GEEN_MELK : 'MELK is nog niet klaar voor Cel voor Cel (' + (w.fout || 'onbekende fout') + '). Vraag het aan de beheerder van MELK.', 503);
+      const nr = String(w.nr || '').replace(/[^A-Za-z0-9_-]/g, '');
+      if (!nr) return fail('Meld je opnieuw aan via MELK.', 401);
+      const id = 'melk-' + nr;
+      const weergave = clean(w.naam);
+      let voornaam = clean(w.voornaam), naam = '';
+      if (voornaam && weergave.toLowerCase().startsWith(voornaam.toLowerCase())) naam = weergave.slice(voornaam.length).trim();
+      else if (weergave) { voornaam = weergave; naam = ''; }
+      const nu = new Date().toISOString();
       let s = await getStudent(id);
-      if (!s) {
-        if (!body.nieuw) return json({ nieuw: true, message: 'Er bestaat nog geen account met deze naam en klas.' });
-        const salt = crypto.randomBytes(8).toString('hex');
-        s = { id, voornaam, naam, klas, salt, codeHash: hashCode(salt, code), created: new Date().toISOString(), lastSeen: new Date().toISOString(), progress: {}, attempts: [] };
-        await putStudent(s);
-      } else if (s.codeHash !== hashCode(s.salt, code)) {
-        return fail('Deze code klopt niet. Vraag je leerkracht om je code opnieuw in te stellen.', 401);
-      } else {
-        s.lastSeen = new Date().toISOString();
-        await putStudent(s);
-      }
-      return json({ token: sign({ role: 's', id, exp: Date.now() + 1000 * 60 * 60 * 12 }), student: publicStudent(s) });
+      if (!s) s = { id, created: nu, progress: {}, attempts: [] };
+      Object.assign(s, { nr, voornaam: voornaam || 'Leerling', naam, klas: clean(w.klasnaam) || String(w.klascode || ''), klascode: String(w.klascode || ''), leerjaar: String(w.leerjaar || ''), schooljaar: String(w.schooljaar || ''), lastSeen: nu });
+      await putStudent(s);
+      const exp = Math.min(Date.now() + 1000 * 60 * 60 * 12, Number(w.geldigTot) || Date.now() + 1000 * 60 * 60 * 3);
+      return json({ token: sign({ role: 's', id, exp }), student: publicStudent(s) });
     }
 
     if (route.startsWith('teacher/')) {
       // ---------------- leerkracht ----------------
-      if (route === 'teacher/login' && method === 'POST') {
-        const pw = String(body.wachtwoord || '');
-        const real = env('LEERKRACHT_WACHTWOORD');
-        const a = crypto.createHash('sha256').update(pw).digest(), b = crypto.createHash('sha256').update(real).digest();
-        if (!real || !crypto.timingSafeEqual(a, b)) return fail('Dit wachtwoord klopt niet.', 401);
-        return json({ token: sign({ role: 't', exp: Date.now() + 1000 * 60 * 60 * 12 }) });
+      if (route === 'teacher/login') return fail('Je meldt je aan via MELK (link per mail).', 410);
+      if (route === 'teacher/melk' && method === 'POST') {
+        const w = await deur('lkWie', body.token);
+        if (!w.ok) return w.opnieuwInloggen ? fail('Meld je opnieuw aan als leerkracht.', 401) : fail(w.geenVerbinding ? GEEN_MELK : 'MELK is nog niet klaar voor Cel voor Cel (' + (w.fout || 'onbekende fout') + '). Vraag het aan de beheerder van MELK.', 503);
+        const klassen = (w.klassen || []).map(k => ({ klascode: String(k.klascode), klasnaam: String(k.klasnaam || k.klascode) }));
+        const token = sign({ role: 't', kl: klassen.map(k => k.klascode), b: w.beheerder === true, naam: clean(w.naam), exp: Date.now() + 1000 * 60 * 60 * 8 });
+        return json({ token, naam: clean(w.naam), beheerder: w.beheerder === true, klassen });
       }
-      if (!auth || auth.role !== 't') return fail('Meld je opnieuw aan als leerkracht.', 401);
+      if (!auth || auth.role !== 't' || !Array.isArray(auth.kl)) return fail('Meld je opnieuw aan als leerkracht.', 401);
 
       if (route === 'teacher/overview') {
         const { blobs } = await store().list({ prefix: 'students/' });
         const all = await Promise.all(blobs.map(b => store().get(b.key, { type: 'json' })));
-        return json({ students: all.filter(Boolean).map(s => { const p = publicStudent(s); p.attempts = (p.attempts || []).map(({ results, ...a }) => a); return p; }) });
+        return json({ students: all.filter(s => magZien(auth, s)).map(s => { const p = publicStudent(s); p.attempts = (p.attempts || []).map(({ results, ...a }) => a); return p; }) });
       }
       if (route === 'teacher/student') {
         const s = await getStudent(url.searchParams.get('id'));
-        return s ? json({ student: publicStudent(s) }) : fail('Leerling niet gevonden.', 404);
+        return magZien(auth, s) ? json({ student: publicStudent(s) }) : fail('Leerling niet gevonden.', 404);
       }
       if (route === 'teacher/file') {
         const key = url.searchParams.get('key') || '';
         if (!key.startsWith('files/')) return fail('Onbekend bestand.', 404);
+        if (!magZien(auth, await getStudent(key.split('/')[1]))) return fail('Bestand niet gevonden.', 404);
         const buf = await store().get(key, { type: 'arrayBuffer' });
         if (!buf) return fail('Bestand niet gevonden.', 404);
         return json({ b64: Buffer.from(buf).toString('base64') });
       }
-      if (route === 'teacher/reset' && method === 'POST') {
-        const s = await getStudent(body.id);
-        if (!s) return fail('Leerling niet gevonden.', 404);
-        if (!/^\d{4,8}$/.test(String(body.code || ''))) return fail('Een code bestaat uit 4 tot 8 cijfers.');
-        s.salt = crypto.randomBytes(8).toString('hex'); s.codeHash = hashCode(s.salt, body.code);
-        await putStudent(s);
-        return json({ ok: true });
-      }
       if (route === 'teacher/module-reset' && method === 'POST') {
         const s = await getStudent(body.id);
-        if (!s) return fail('Leerling niet gevonden.', 404);
+        if (!magZien(auth, s)) return fail('Leerling niet gevonden.', 404);
         delete s.progress[body.moduleId];
         await putStudent(s);
         return json({ ok: true });
       }
       if (route === 'teacher/delete' && method === 'POST') {
         const s = await getStudent(body.id);
-        if (!s) return fail('Leerling niet gevonden.', 404);
+        if (!magZien(auth, s)) return fail('Leerling niet gevonden.', 404);
         const { blobs } = await store().list({ prefix: 'files/' + s.id + '/' });
         await Promise.all(blobs.map(b => store().delete(b.key)));
         await store().delete('students/' + s.id);
