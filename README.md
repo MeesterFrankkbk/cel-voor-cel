@@ -2,18 +2,22 @@
 
 Stap voor stap Excel leren voor leerlingen van 9 tot 13 jaar. De leerling leert in de app, oefent in het echte Excel, laadt het bestand op en krijgt meteen feedback. De leerkracht volgt alles op.
 
-## Online zetten (zoals Kangoeroe-Kluis)
+## Online zetten en aanmelden (gekoppeld aan MELK)
 
-1. Maak een nieuwe repository op GitHub en zet alle bestanden van deze map erin.
-2. In Netlify: **Add new site → Import an existing project** en kies de repository. De instellingen staan al in `netlify.toml`.
-3. In Netlify: **Site configuration → Environment variables** → voeg toe:
-   - `LEERKRACHT_WACHTWOORD` = het wachtwoord voor het leerkrachtoverzicht.
-4. Klik op **Deploy**. Klaar.
+De app staat op GitHub en Netlify zet hem automatisch online (`https://cel-voor-cel.netlify.app`).
 
-- Leerlingen: `https://<jouw-site>.netlify.app/`
-- Leerkracht: `https://<jouw-site>.netlify.app/leerkracht.html`
+- **Leerlingen** melden zich aan via MELK (klas, naam, pincode of prentjescode). Ze hebben geen eigen account of code meer
+  in Cel voor Cel. Wat ze doen, wordt bewaard onder hun MELK-leerlingnummer. Elke poging gaat ook naar MELK
+  (klasoverzicht en mail voor de leerkracht).
+- **Leerkrachten**: `https://cel-voor-cel.netlify.app/leerkracht.html`. Aanmelden met de link per mail (MELK).
+  Een leerkracht ziet de leerlingen van zijn klassen (kolom Klassen in het tabblad Leerkrachten), een beheerder ziet iedereen.
+- **Bekijken** op de MELK-leerkrachtenpagina opent de app in proefmodus: alles is open, er wordt niets bewaard.
+- Wie de app krijgt, regel je in het meesterbestand: tabblad **Klas-apps**, een rij met de klascode, `celvoorcel` en `ja`.
 
-De opslag (leerlingen, voortgang, opgeladen Excel-bestanden) gebeurt in **Netlify Blobs**. Daar hoef je niets voor in te stellen.
+In Netlify (Site configuration → Environment variables) blijft `LEERKRACHT_WACHTWOORD` staan: het is geen wachtwoord
+meer, het dient enkel als geheime sleutel om de aanmeldingen te ondertekenen. Niemand hoeft het te kennen.
+
+De opslag (voortgang, opgeladen Excel-bestanden) gebeurt in **Netlify Blobs**. Daar hoef je niets voor in te stellen.
 
 Open je `index.html` zonder Netlify (bv. lokaal), dan start de app in **demomodus**: alles blijft in die browser, het leerkrachtwachtwoord is dan `demo`.
 
@@ -36,7 +40,7 @@ Het ontwerp van elke stap staat in de map `docs/`.
 
 ## Hoe het werkt
 
-- **Aanmelden**: voornaam, naam, klas en een eigen code (4 tot 8 cijfers). De eerste keer maakt de leerling zelf zijn account. Code vergeten? De leerkracht stelt een nieuwe in.
+- **Aanmelden**: via MELK. Pincode vergeten? De leerkracht stelt een nieuwe in op de MELK-leerkrachtenpagina.
 - **Elke stap** heeft drie delen: *Leren* (uitleg met korte oefeningen in de app, met voorleesknop), *Oefenen in Excel* (met hulplijnen) en *Test* (nieuwe opdrachten, geen hulplijnen, 80% nodig).
 - **Ik kan dit al**: een leerling mag meteen naar de test. De volgende stap gaat open als de test gehaald is.
 - **Elke leerling krijgt andere opdrachten** (andere cellen, woorden, kleuren). De leerkracht ziet precies welke.
