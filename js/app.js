@@ -23,10 +23,11 @@
   const fmtDate = d => new Date(d).toLocaleString('nl-BE', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
 
   // ---------------- toestand ----------------
-  const S = { student: null, view: 'home', mid: null, tab: 'learn', lesson: 0, busy: false, uploadRoute: 'A', results: {} };
+  // modus: 'melk' (leerling aangemeld via MELK), 'proef' (leerkracht bekijkt, niets bewaard), 'demo' (geen server: oude aanmelding in deze browser)
+  const S = { modus: 'demo', student: null, view: 'home', mid: null, tab: 'learn', lesson: 0, busy: false, uploadRoute: 'A', results: {} };
   const prog = mid => (S.student && S.student.progress && S.student.progress[mid]) || {};
   const modIndex = mid => MODULES.findIndex(m => m.id === mid);
-  const isUnlocked = i => i === 0 || !!prog(MODULES[i - 1].id).test?.passed;
+  const isUnlocked = i => i === 0 || S.modus === 'proef' || !!prog(MODULES[i - 1].id).test?.passed;
   const lessonsDone = m => m.lessons.filter(l => prog(m.id).lessons?.[l.id]).length;
 
   async function save(mid, patch) {
@@ -53,11 +54,14 @@
   function renderWho() {
     const w = clear(document.getElementById('who'));
     if (!S.student) return;
+    if (S.modus === 'melk') return; // naam en de knop Klaar staan in de MELK-balk bovenaan
+    if (S.modus === 'proef') return w.append(h('span', { class: 'chip' }, 'Proefmodus'));
     w.append(h('div', { class: 'btn-row', style: 'flex-wrap:nowrap' },
       h('div', { class: 'namebox', title: 'Aangemeld als' }, h('b', {}, S.student.klas), h('span', {}, S.student.voornaam + ' ' + S.student.naam)),
       h('button', { class: 'btn ghost small', onclick: () => logout() }, 'Afmelden')));
   }
   function logout(msg) {
+    if (S.modus === 'melk') { Api.logout(); S.student = null; return melkAanmelden(); }
     Api.logout(); S.student = null; S.view = 'home'; renderWho(); renderLogin(msg);
   }
   document.getElementById('logo').addEventListener('click', e => { e.preventDefault(); if (S.student) { S.view = 'home'; render(); } });
@@ -1275,6 +1279,14 @@
         toast('Nagekeken, maar niet doorgestuurd: ' + e.message, true);
       }
       S.results[m.id + mode + seed] = results;
+      if (S.modus === 'melk' && window.MELK) {
+        // resultaat ook naar MELK (klasoverzicht en mail voor de leerkracht); MELK bewaart het opnieuw als er even geen verbinding is
+        const fout = results.filter(r => !r.ok).map(r => { const t = gen.tasks.find(x => x.id === r.id); return String(t ? t.text : r.id).replace(/<[^>]+>/g, '').slice(0, 100); });
+        const extra = { stap: m.nr, bestand: file.name };
+        if (m.levels) { extra.niveau = m.levelOf(seed); extra.sterren = patch[mode].lastStars; }
+        if (mode === 'test') extra.geslaagd = okNow;
+        try { MELK.stuur({ onderdeel: `Stap ${m.nr}: ${m.title}`, oefening: mode === 'test' ? 'test' : 'oefenen', opgaven: total, juist: score, hulp: mode === 'practice' ? hints : 0, moeilijk: fout, extra }); } catch (e) { /* MELK niet beschikbaar */ }
+      }
       render();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -1286,11 +1298,61 @@
   // ---------------- start ----------------
   function render() {
     renderWho();
-    if (!S.student) return renderLogin();
+    if (!S.student) return S.modus === 'melk' ? melkAanmelden() : renderLogin();
     if (S.view === 'module') renderModule(); else renderHome();
   }
+  // ---------------- aanmelden via MELK ----------------
+  async function melkAanmelden() {
+    const a = window.MELK && MELK.huidige();
+    if (!a) { MELK.klaar(); return; }               // MELK-sessie voorbij: terug naar het aanmeldscherm van MELK
+    clear($app).append(h('p', { class: 'muted pad' }, 'Even aanmelden …'));
+    try {
+      const d = await Api.melkLogin(a.token);
+      S.student = d.student; S.view = 'home'; render();
+    } catch (e) {
+      if (e.status === 401) { MELK.klaar(); return; }
+      if (e.status === 403) {
+        clear($app).append(h('div', { class: 'sheet pad', style: 'max-width:520px;margin:24px auto;display:grid;gap:12px' },
+          h('p', { class: 'msg bad' }, e.message), h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => MELK.klaar() }, 'Terug naar MELK'))));
+        return;
+      }
+      clear($app).append(h('div', { class: 'sheet pad', style: 'max-width:520px;margin:24px auto;display:grid;gap:12px' },
+        h('p', { class: 'msg bad' }, e.message),
+        h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: melkAanmelden }, 'Probeer opnieuw'))));
+    }
+  }
+  function proefBand() {
+    const band = document.getElementById('demoBand');
+    clear(band).append(h('div', {}, h('b', {}, 'Proefmodus: '), 'je ziet alles zoals een leerling, maar er wordt niets bewaard. ',
+      h('a', { href: 'leerkracht.html' }, 'Naar het leerkrachtoverzicht (pogingen en bestanden van je leerlingen)')));
+    band.hidden = false;
+  }
+
   (async function boot() {
     const { demo } = await Api.init();
+    if (!demo && window.MELK) {
+      const r = MELK.start({ app: 'celvoorcel' });
+      if (r.omgeleid) return;
+      if (r.aanmelding) {
+        S.modus = 'melk';
+        // de kop van Cel voor Cel blijft onder de MELK-balk staan bij het scrollen
+        const balk = document.getElementById('melk-balk'), kop = document.querySelector('.top');
+        if (balk && kop) kop.style.top = `calc(${balk.offsetHeight}px + env(safe-area-inset-top, 0px))`;
+        // Tijdens het werk in Excel staat deze pagina stil: zolang de leerling in een stap zit, niet afmelden wegens stilte.
+        setInterval(() => { if (S.view === 'module' && S.student) MELK.actief(); }, 60000);
+        // Zelfde MELK-aanmelding als de vorige keer in dit tabblad? Dan de sessie gewoon verder gebruiken.
+        if (Api.hasSession() && Api.melkTokenVanSessie() === r.aanmelding.token) {
+          try { const d = await Api.me(); S.student = d.student; return render(); } catch (e) { Api.logout(); }
+        }
+        return melkAanmelden();
+      }
+      // leerkracht zonder leerling (knop "Bekijken" op de MELK-leerkrachtenpagina): proefmodus
+      S.modus = 'proef';
+      Api.useDemo();
+      proefBand();
+      try { const d = await Api.login({ voornaam: 'Juf', naam: 'of meester', klas: 'PROEF', code: '0000', nieuw: true }); S.student = d.student; } catch (e) { /* toon aanmelden */ }
+      return render();
+    }
     document.getElementById('demoBand').hidden = !demo;
     if (Api.hasSession()) {
       try { const d = await Api.me(); S.student = d.student; } catch (e) { Api.logout(); }

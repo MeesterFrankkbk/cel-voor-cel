@@ -106,13 +106,21 @@
     return { demo };
   }
   const call = (p, o) => backend.call(p, o);
+  // Proefmodus (leerkracht bekijkt de app): alles in deze browser, niets naar de server.
+  function useDemo() { backend = new Demo(); demo = true; }
 
   const Api = {
     init,
     isDemo: () => demo,
+    useDemo,
+    // aanmelden via MELK: het toegangsbewijs van MELK inruilen voor een sessie van Cel voor Cel
+    async melkLogin(melkToken) { const d = await call('melk-login', { body: { token: melkToken } }); ss.set(TKEY, d.token); ss.set(TKEY + '-melk', melkToken); return d; },
+    melkTokenVanSessie: () => ss.get(TKEY + '-melk'),
+    async tMelk(melkToken) { const d = await call('teacher/melk', { body: { token: melkToken } }); ss.set(TKEY + '-t', d.token); ss.set(TKEY + '-tinfo', JSON.stringify({ naam: d.naam, beheerder: d.beheerder, klassen: d.klassen })); return d; },
+    tInfo() { try { return JSON.parse(ss.get(TKEY + '-tinfo') || 'null'); } catch (e) { return null; } },
     // leerling
     async login(form) { const d = await call('login', { body: form }); if (d.token) ss.set(TKEY, d.token); return d; },
-    logout() { ss.del(TKEY); },
+    logout() { ss.del(TKEY); ss.del(TKEY + '-melk'); },
     hasSession: () => !!ss.get(TKEY),
     me: () => call('me'),
     progress: (moduleId, patch) => call('progress', { body: { moduleId, patch } }),
@@ -120,7 +128,7 @@
     lastFile: moduleId => call('lastfile?module=' + encodeURIComponent(moduleId)),
     // leerkracht
     async tLogin(wachtwoord) { const d = await call('teacher/login', { body: { wachtwoord } }); ss.set(TKEY + '-t', d.token); return d; },
-    tLogout() { ss.del(TKEY + '-t'); },
+    tLogout() { ss.del(TKEY + '-t'); ss.del(TKEY + '-tinfo'); },
     tHasSession: () => !!ss.get(TKEY + '-t'),
     tOverview: () => call('teacher/overview', { teacher: true }),
     tStudent: id => call('teacher/student?id=' + encodeURIComponent(id), { teacher: true }),

@@ -23,13 +23,36 @@
 
   const T = { students: [], klas: '', zoek: '', detail: null };
 
+  const MELKMODUS = () => !Api.isDemo() && !!window.MELK;
   function renderWho() {
     const w = clear(document.getElementById('who'));
-    if (Api.tHasSession()) w.append(h('button', { class: 'btn ghost small', onclick: () => { Api.tLogout(); renderLogin(); renderWho(); } }, 'Afmelden'));
+    if (!Api.tHasSession()) return;
+    const info = Api.tInfo();
+    w.append(h('div', { class: 'btn-row', style: 'flex-wrap:nowrap' },
+      info ? h('span', { class: 'small muted' }, info.naam + (info.beheerder ? ' · beheerder' : '')) : null,
+      h('button', { class: 'btn ghost small', onclick: () => { Api.tLogout(); if (MELKMODUS()) MELK.leerkrachtAfmelden(); renderWho(); renderAfgemeld(); } }, 'Afmelden')));
+  }
+  function renderAfgemeld() {
+    if (!MELKMODUS()) return renderLogin();
+    clear($app).append(h('div', { class: 'sheet pad form', style: 'max-width:460px' }, h('h1', {}, 'Je bent afgemeld'),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => melkLogin() }, 'Opnieuw aanmelden'))));
+  }
+  // Aanmelden via MELK: link per mail op melk-start; daarna vraagt de server van Cel voor Cel aan MELK wie je bent.
+  async function melkLogin() {
+    clear($app);
+    await MELK.slot({ app: 'celvoorcel' });          // stuurt door naar MELK als je nog niet aangemeld bent
+    clear($app).append(h('p', { class: 'muted' }, 'Even nakijken wie je bent …'));
+    try { await Api.tMelk(MELK.leerkrachtToken()); renderWho(); load(); }
+    catch (e) {
+      if (e.status === 401) MELK.leerkrachtAfmelden();   // de knop hieronder vraagt dan een nieuwe aanmelding bij MELK
+      clear($app).append(h('div', { class: 'sheet pad', style: 'max-width:520px;display:grid;gap:12px' }, h('p', { class: 'msg bad' }, e.message),
+        h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: () => melkLogin() }, e.status === 401 ? 'Opnieuw aanmelden' : 'Probeer opnieuw'))));
+    }
   }
   document.getElementById('logo').addEventListener('click', e => { e.preventDefault(); if (Api.tHasSession()) { T.detail = null; renderOverview(); } });
 
   function renderLogin(msg) {
+    if (MELKMODUS()) return melkLogin();
     clear($app);
     const pw = h('input', { class: 'in', type: 'password', id: 't-pw', autocomplete: 'current-password' });
     const err = h('p', { class: 'msg bad', hidden: !msg }, msg || '');
@@ -44,7 +67,7 @@
   async function load() {
     clear($app).append(h('p', { class: 'muted' }, 'Laden …'));
     try { const d = await Api.tOverview(); T.students = d.students.sort((a, b) => (a.klas + a.naam + a.voornaam).localeCompare(b.klas + b.naam + b.voornaam, 'nl')); }
-    catch (e) { if (e.status === 401) { Api.tLogout(); return renderLogin(e.message); } clear($app).append(h('p', { class: 'msg bad' }, e.message)); return; }
+    catch (e) { if (e.status === 401) { Api.tLogout(); if (MELKMODUS()) MELK.leerkrachtAfmelden(); return renderLogin(e.message); } clear($app).append(h('p', { class: 'msg bad' }, e.message)); return; }
     if (T.detail) openStudent(T.detail); else renderOverview();
   }
 
@@ -73,7 +96,7 @@
     const drawTable = () => {
       const list = T.students.filter(s => (!T.klas || s.klas === T.klas) && (!T.zoek || (s.voornaam + ' ' + s.naam).toLowerCase().includes(T.zoek.toLowerCase())));
       clear(wrap);
-      if (!list.length) return wrap.append(h('p', { class: 'pad muted' }, T.students.length ? 'Geen leerlingen gevonden.' : 'Nog geen leerlingen. Een leerling verschijnt hier zodra hij of zij zich voor het eerst aanmeldt.'));
+      if (!list.length) return wrap.append(h('p', { class: 'pad muted' }, T.students.length ? 'Geen leerlingen gevonden.' : (MELKMODUS() ? 'Nog geen leerlingen van jouw klassen. Een leerling verschijnt hier zodra hij of zij Cel voor Cel voor het eerst opent (aanmelden via MELK).' : 'Nog geen leerlingen. Een leerling verschijnt hier zodra hij of zij zich voor het eerst aanmeldt.')));
       wrap.append(h('table', { class: 't' },
         h('thead', {}, h('tr', {}, h('th', {}, 'Klas'), h('th', {}, 'Leerling'), MODULES.map(m => h('th', {}, `${m.nr}. ${m.title}`)), h('th', {}, 'Laatst actief'))),
         h('tbody', {}, list.map(s => h('tr', { onclick: () => openStudent(s.id), tabindex: '0', onkeydown: e => { if (e.key === 'Enter') openStudent(s.id); } },
@@ -115,7 +138,7 @@
     const actions = h('div', { style: 'display:grid;gap:10px' });
     const drawActions = () => {
       clear(actions).append(h('div', { class: 'btn-row' },
-        h('button', { class: 'btn small', onclick: () => {
+        MELKMODUS() ? h('span', { class: 'small muted' }, 'Pincode vergeten? Die stel je opnieuw in op de MELK-leerkrachtenpagina.') : h('button', { class: 'btn small', onclick: () => {
           const inp = h('input', { class: 'in', id: 't-newcode', inputmode: 'numeric', placeholder: 'nieuwe code', style: 'width:150px', maxlength: 8 });
           clear(actions).append(h('div', { class: 'confirm-box' }, h('label', { class: 'f', for: 't-newcode' }, `Nieuwe code voor ${s.voornaam} (4 tot 8 cijfers)`, inp),
             h('div', { class: 'btn-row' }, h('button', { class: 'btn small primary', onclick: async () => { try { await Api.tReset(s.id, inp.value.trim()); drawActions(); actions.prepend(h('p', { class: 'msg ok' }, `De code is nu ${inp.value.trim()}. Geef die door aan ${s.voornaam}.`)); } catch (e) { actions.append(h('p', { class: 'msg bad' }, e.message)); } } }, 'Bewaar code'), h('button', { class: 'btn small', onclick: drawActions }, 'Annuleer'))));
@@ -155,7 +178,7 @@
     $app.append(
       h('div', { class: 'crumb' }, h('button', { class: 'btn ghost small', onclick: () => { T.detail = null; renderOverview(); } }, '← Overzicht')),
       h('div', { class: 'drawer' },
-        h('div', { class: 'mod-head' }, h('span', { class: 'eyebrow' }, s.klas), h('h1', {}, `${s.voornaam} ${s.naam}`), h('p', { class: 'muted small' }, `Account sinds ${fmt(s.created)} · laatst actief ${fmt(s.lastSeen)}`)),
+        h('div', { class: 'mod-head' }, h('span', { class: 'eyebrow' }, s.klas), h('h1', {}, `${s.voornaam} ${s.naam}`), h('p', { class: 'muted small' }, `${MELKMODUS() ? 'Eerste keer' : 'Account sinds'} ${fmt(s.created)} · laatst actief ${fmt(s.lastSeen)}`)),
         actions, mods));
     window.scrollTo(0, 0);
   }
@@ -192,6 +215,7 @@
   (async function boot() {
     const { demo } = await Api.init();
     document.getElementById('demoBand').hidden = !demo;
+    if (MELKMODUS() && /(^#|&)melklk=/.test(location.hash)) Api.tLogout();   // net terug van MELK: opnieuw nakijken wie je bent
     renderWho();
     if (Api.tHasSession()) load(); else renderLogin();
   })();
